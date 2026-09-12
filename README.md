@@ -54,7 +54,9 @@ Haz doble clic en una cuenta de la ventana de la base de datos para consultar
 su estado actual y obtener desde `player_api.php` la lista de canales live. La
 columna **Canales live** se actualiza con el total recibido y el nuevo popup
 muestra el ID, nombre, categoría, formato y URL directa de cada canal. La
-consulta se ejecuta en segundo plano para no bloquear la interfaz.
+consulta se ejecuta en segundo plano para no bloquear la interfaz. Haz doble
+clic en cualquiera de esos canales para abrir su URL en el reproductor o
+navegador predeterminado del sistema.
 
 ## Pruebas
 

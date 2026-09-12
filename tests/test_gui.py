@@ -2,14 +2,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from iptv_checker.checker import CheckResult
-from iptv_checker.gui import _account_row, _save_available_account
+from iptv_checker.gui import _account_row, _open_stream, _save_available_account
 from iptv_checker.playlist import Channel
 from iptv_checker.xtream import XtreamAccount, XtreamDatabase
 
 
 class SavedAccountsViewTest(unittest.TestCase):
+    @patch("iptv_checker.gui.webbrowser.open", return_value=True)
+    def test_opens_channel_in_default_player(self, open_mock) -> None:
+        url = "https://tv.example/live/alice/secret/42.ts"
+
+        self.assertTrue(_open_stream(url))
+
+        open_mock.assert_called_once_with(url, new=2)
+
     def test_formats_saved_account_without_exposing_password(self) -> None:
         account = XtreamAccount(
             "Servidor principal",
