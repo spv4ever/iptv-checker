@@ -1,28 +1,26 @@
-# IPTV Checker
+# Comprobador de URLs
 
-Comprobador de listas IPTV escrito en Python y sin dependencias externas. Lee una
-lista M3U, comprueba sus URLs HTTP(S) en paralelo y muestra un resumen legible o
-JSON para integrarlo con otros procesos.
+Aplicación gráfica sencilla, escrita en Python, para comprobar varias URLs a la
+vez. No necesita instalar paquetes adicionales.
 
-## Uso
+## Iniciar en Windows
 
-```bash
-python -m iptv_checker lista.m3u
-python -m iptv_checker lista.m3u --workers 20 --timeout 5 --json
+Abre una terminal en esta carpeta y ejecuta:
+
+```bat
+python app.py
 ```
 
-También se puede instalar como comando:
+También puedes abrir `iniciar.bat` con doble clic.
 
-```bash
-python -m pip install .
-iptv-checker lista.m3u
-```
+Pega una URL `http://` o `https://` por línea y pulsa **Comprobar**. La tabla
+mostrará si cada dirección está disponible, su código HTTP y el tiempo de
+respuesta.
 
-El código de salida es `0` cuando todos los canales responden correctamente y
-`1` cuando alguno falla. Las entradas sin URL o con un esquema no soportado se
-descartan con un aviso durante el parseo.
+Requiere Python 3.10 o posterior. La interfaz utiliza Tkinter, incluido en la
+instalación normal de Python para Windows.
 
-## Desarrollo
+## Pruebas
 
 ```bash
 PYTHONPATH=src python -m unittest discover -s tests -v
