@@ -52,11 +52,11 @@ contraseña no se muestra en esta vista.
 
 Haz doble clic en una cuenta de la ventana de la base de datos para consultar
 su estado actual y obtener desde `player_api.php` la lista de canales live. La
-columna **Canales live** se actualiza con el total recibido y el nuevo popup
-muestra el ID, nombre, categoría, formato y URL directa de cada canal. La
-consulta se ejecuta en segundo plano para no bloquear la interfaz. Haz doble
-clic en cualquiera de esos canales para reproducirlo directamente en VLC. La
-aplicación entrega a VLC la URL directa generada por Xtream, que ya incluye el
+aplicación comprueba además cada URL de stream en segundo plano, coloca primero
+los canales accesibles y muestra en la columna **Acceso** cuáles han respondido.
+La columna **Canales live** se actualiza con la cantidad accesible y el total
+recibido. Haz doble clic en un canal accesible para reproducirlo directamente
+en VLC. La aplicación entrega a VLC la URL directa generada por Xtream, que ya incluye el
 usuario y la contraseña necesarios, sin abrir el navegador. Para usar esta
 función debes tener VLC instalado; se detecta desde `PATH` y también en las
 ubicaciones habituales de Windows y macOS.

@@ -5,12 +5,43 @@ import unittest
 from unittest.mock import patch
 
 from iptv_checker.checker import CheckResult
-from iptv_checker.gui import _account_row, _open_stream, _save_available_account
+from iptv_checker.gui import (
+    _account_row,
+    _check_live_channels,
+    _open_stream,
+    _save_available_account,
+)
 from iptv_checker.playlist import Channel
-from iptv_checker.xtream import XtreamAccount, XtreamDatabase
+from iptv_checker.xtream import XtreamAccount, XtreamChannel, XtreamDatabase, XtreamDetails
 
 
 class SavedAccountsViewTest(unittest.TestCase):
+    @patch("iptv_checker.gui.PlaylistChecker.check_all")
+    def test_checks_every_live_stream_before_it_can_be_opened(self, check_all_mock) -> None:
+        channels = (
+            XtreamChannel(1, "Disponible", "", "", "ts", "http://tv.example/live/u/p/1.ts"),
+            XtreamChannel(2, "Caído", "", "", "ts", "http://tv.example/live/u/p/2.ts"),
+        )
+        details = XtreamDetails("Active", None, 0, 1, channels)
+        check_all_mock.return_value = [
+            CheckResult(
+                Channel(channel.name, channel.direct_url),
+                index == 0,
+                200 if index == 0 else 404,
+                5,
+            )
+            for index, channel in enumerate(channels)
+        ]
+
+        results = _check_live_channels(details, timeout=3)
+
+        checked = check_all_mock.call_args.args[0]
+        self.assertEqual(
+            [channel.url for channel in checked],
+            [channel.direct_url for channel in channels],
+        )
+        self.assertEqual([result.available for result in results], [True, False])
+
     @patch("iptv_checker.gui.subprocess.Popen")
     @patch("iptv_checker.gui._vlc_executable", return_value="/usr/bin/vlc")
     def test_opens_authenticated_channel_in_vlc(self, _vlc_mock, popen_mock) -> None:

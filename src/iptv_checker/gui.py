@@ -183,29 +183,43 @@ class CheckerApp(tk.Tk):
         summary = ttk.Label(container, text="Consultando la API Xtream…")
         summary.pack(anchor="w", pady=(2, 10))
 
-        columns = ("id", "name", "category", "format", "url")
+        columns = ("id", "name", "category", "format", "availability", "url")
         table = ttk.Treeview(container, columns=columns, show="headings")
         for column, heading, width in (
             ("id", "ID", 65),
             ("name", "Canal", 240),
             ("category", "Categoría", 170),
             ("format", "Formato", 70),
-            ("url", "URL directa", 440),
+            ("availability", "Acceso", 105),
+            ("url", "URL directa", 335),
         ):
             table.heading(column, text=heading)
-            table.column(column, width=width, anchor="center" if column in {"id", "format"} else "w")
+            table.column(
+                column,
+                width=width,
+                anchor="center" if column in {"id", "format", "availability"} else "w",
+            )
+        table.tag_configure("ok", foreground="#14833b")
+        table.tag_configure("error", foreground="#c62828")
         table.pack(fill="both", expand=True)
         ttk.Label(
             container,
-            text="Haz doble clic en un canal para reproducirlo directamente en VLC.",
+            text="Primero se comprueba cada stream. Sólo los accesibles se pueden abrir en VLC.",
         ).pack(anchor="w", pady=(6, 0))
-        result_queue: Queue[XtreamDetails | Exception] = Queue()
+        result_queue: Queue[tuple[XtreamDetails, list[CheckResult]] | Exception] = Queue()
 
         def play_channel(event: tk.Event[tk.Misc]) -> None:
             item = table.identify_row(event.y)
             if not item:
                 return
             direct_url = table.set(item, "url")
+            if "ok" not in table.item(item, "tags"):
+                messagebox.showwarning(
+                    "Canal no accesible",
+                    "Este stream no superó la comprobación y no se enviará a VLC.",
+                    parent=popup,
+                )
+                return
             try:
                 opened = _open_stream(direct_url)
             except OSError as exc:
@@ -226,7 +240,11 @@ class CheckerApp(tk.Tk):
 
         def load() -> None:
             try:
-                result_queue.put(XtreamClient(account).details())
+                details = XtreamClient(account).details()
+                # La API puede anunciar canales que ya no tienen un stream
+                # operativo. Se prueba cada URL antes de mostrársela al usuario.
+                checks = _check_live_channels(details)
+                result_queue.put((details, checks))
             except Exception as exc:  # Se comunica el error de la tarea al hilo de la interfaz.
                 result_queue.put(exc)
 
@@ -240,7 +258,8 @@ class CheckerApp(tk.Tk):
             if isinstance(result, Exception):
                 failed(str(result))
             else:
-                show(result)
+                details, checks = result
+                show(details, checks)
 
         def failed(error: str) -> None:
             if popup.winfo_exists():
@@ -248,22 +267,32 @@ class CheckerApp(tk.Tk):
             if account_table.winfo_exists():
                 account_table.set(account_item, "live", "Error")
 
-        def show(details: XtreamDetails) -> None:
+        def show(details: XtreamDetails, checks: list[CheckResult]) -> None:
             if not popup.winfo_exists():
                 return
-            for channel in details.channels:
+            checked_by_url = {check.channel.url: check for check in checks}
+            ordered_channels = sorted(
+                details.channels,
+                key=lambda channel: not checked_by_url[channel.direct_url].available,
+            )
+            for channel in ordered_channels:
+                check = checked_by_url[channel.direct_url]
+                access = "Accesible" if check.available else "No accesible"
                 table.insert(
                     "", "end",
                     values=(channel.stream_id, channel.name, channel.category_name,
-                            channel.container_extension, channel.direct_url),
+                            channel.container_extension, access, channel.direct_url),
+                    tags=("ok" if check.available else "error",),
                 )
+            available = sum(check.available for check in checks)
             connections = _format_connections(details.active_connections, details.max_connections)
             summary.configure(
                 text=(f"Estado: {details.status} · Caducidad: {_format_date(details.valid_until)} "
-                      f"· Conexiones: {connections} · {len(details.channels)} canal(es) live")
+                      f"· Conexiones: {connections} · {available}/{len(details.channels)} "
+                      "canal(es) accesible(s)")
             )
             if account_table.winfo_exists():
-                account_table.set(account_item, "live", str(len(details.channels)))
+                account_table.set(account_item, "live", f"{available}/{len(details.channels)}")
 
         Thread(target=load, daemon=True).start()
         popup.after(100, poll)
@@ -379,6 +408,14 @@ def _save_available_account(result: CheckResult, database_path: str | Path) -> b
     )
     XtreamDatabase(database_path).save(validated_account)
     return True
+
+
+def _check_live_channels(details: XtreamDetails, *, timeout: float = 8) -> list[CheckResult]:
+    """Comprueba los streams anunciados por la API Xtream."""
+
+    channels = tuple(Channel(channel.name, channel.direct_url) for channel in details.channels)
+    checker = PlaylistChecker(timeout=timeout, workers=min(10, max(1, len(channels))))
+    return checker.check_all(channels)
 
 
 def _account_row(account: XtreamAccount) -> tuple[str, ...]:
