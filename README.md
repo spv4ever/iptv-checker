@@ -65,7 +65,8 @@ validación y la caducidad devuelta por la cuenta Xtream. El panel **Actividad**
 el estado de la ventana de canales indican qué fase se está ejecutando.
 Si la fecha ya ha vencido o la API no responde al abrir la cuenta, ésta queda
 marcada en rojo como **Obsoleta**. El botón **Limpiar cuentas obsoletas** permite
-borrar de SQLite, previa confirmación, todas las cuentas caducadas o fallidas.
+borrar de SQLite, previa confirmación, las cuentas caducadas o fallidas del
+servidor seleccionado.
 
 Haz doble clic en cualquier canal para abrirlo directamente en la ventana nativa
 del primer reproductor disponible: **mpv**, **ffplay** o **VLC**. No se crea una

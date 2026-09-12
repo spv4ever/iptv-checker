@@ -228,42 +228,61 @@ class CheckerApp(tk.Tk):
         table.bind("<Double-1>", open_channels)
 
         def delete_obsolete() -> None:
+            selected_server = server_filter.get()
+            if selected_server == ALL_SERVERS:
+                messagebox.showinfo(
+                    "Selecciona un servidor",
+                    "Selecciona un servidor concreto antes de limpiar sus cuentas obsoletas.",
+                    parent=window,
+                )
+                return
             if not messagebox.askyesno(
                 "Limpiar cuentas obsoletas",
-                "¿Quieres borrar de la base de datos todas las cuentas caducadas o que no funcionan?",
+                f"¿Quieres borrar las cuentas caducadas o que no funcionan de {selected_server}?",
                 parent=window,
             ):
                 return
             try:
-                deleted = XtreamDatabase(self.database_path).delete_obsolete()
+                deleted = XtreamDatabase(self.database_path).delete_obsolete(selected_server)
             except (OSError, sqlite3.Error) as exc:
                 messagebox.showerror("No se pudo limpiar", str(exc), parent=window)
                 return
             refresh()
-            self._log(f"Se eliminaron {deleted} cuenta(s) obsoleta(s).")
+            self._log(
+                f"Se eliminaron {deleted} cuenta(s) obsoleta(s) de {selected_server}."
+            )
             messagebox.showinfo(
                 "Limpieza completada",
-                f"Se eliminaron {deleted} cuenta(s) obsoleta(s).",
+                f"Se eliminaron {deleted} cuenta(s) obsoleta(s) de {selected_server}.",
                 parent=window,
             )
 
-        def delete_all() -> None:
+        def delete_server() -> None:
+            selected_server = server_filter.get()
+            if selected_server == ALL_SERVERS:
+                messagebox.showinfo(
+                    "Selecciona un servidor",
+                    "Selecciona un servidor concreto antes de borrar sus cuentas.",
+                    parent=window,
+                )
+                return
             if not messagebox.askyesno(
-                "Borrar todas las cuentas",
-                "¿Quieres borrar todas las cuentas guardadas? Esta acción no se puede deshacer.",
+                "Borrar cuentas del servidor",
+                f"¿Quieres borrar todas las cuentas de {selected_server}? "
+                "Esta acción no se puede deshacer.",
                 parent=window,
             ):
                 return
             try:
-                deleted = XtreamDatabase(self.database_path).delete_all()
+                deleted = XtreamDatabase(self.database_path).delete_server(selected_server)
             except (OSError, sqlite3.Error) as exc:
                 messagebox.showerror("No se pudieron borrar", str(exc), parent=window)
                 return
             refresh()
-            self._log(f"Se eliminaron todas las cuentas guardadas ({deleted}).")
+            self._log(f"Se eliminaron {deleted} cuenta(s) de {selected_server}.")
             messagebox.showinfo(
                 "Cuentas eliminadas",
-                f"Se eliminaron {deleted} cuenta(s) guardada(s).",
+                f"Se eliminaron {deleted} cuenta(s) de {selected_server}.",
                 parent=window,
             )
 
@@ -271,7 +290,7 @@ class CheckerApp(tk.Tk):
         ttk.Button(
             footer, text="Limpiar cuentas obsoletas", command=delete_obsolete
         ).pack(side="right", padx=(0, 8))
-        ttk.Button(footer, text="Borrar todas", command=delete_all).pack(
+        ttk.Button(footer, text="Borrar servidor", command=delete_server).pack(
             side="right", padx=(0, 8)
         )
         refresh()
