@@ -64,18 +64,13 @@ Al consultar los canales también se actualizan en SQLite el estado, la fecha de
 validación y la caducidad devuelta por la cuenta Xtream. El panel **Actividad** y
 el estado de la ventana de canales indican qué fase se está ejecutando.
 
-Haz doble clic en cualquier canal para abrir una ventana de reproducción
-integrada. La aplicación inicia automáticamente **mpv** y, si no está disponible
-o no puede arrancar, prueba **ffplay**. Incluye controles para reproducir,
-pausar/continuar, parar, ajustar el volumen y cerrar. La URL directa generada por
-Xtream ya contiene el usuario y la contraseña necesarios. La ventana se abre
-maximizada y conserva la relación de aspecto para mostrar el vídeo completo sin
-recortarlo. Añade `mpv` o `ffplay`
-al `PATH`; en algunos entornos
-Wayland, la integración de ffplay depende de la compatibilidad XWayland/SDL del
-sistema, mientras que mpv es la opción recomendada. En Windows, si SDL no aplica
-el contenedor indicado, la aplicación vuelve a alojar automáticamente la ventana
-nativa de ffplay dentro del área de vídeo y la ajusta al redimensionarla.
+Haz doble clic en cualquier canal para abrirlo directamente en la ventana nativa
+del primer reproductor disponible: **mpv**, **ffplay** o **VLC**. No se crea una
+ventana emergente propia ni se intenta incrustar la imagen en la aplicación; el
+reproductor gestiona el tamaño, la relación de aspecto y sus controles. La URL
+directa generada por Xtream ya contiene el usuario y la contraseña necesarios.
+Añade al menos uno de esos reproductores al `PATH` (VLC también se busca en sus
+ubicaciones de instalación habituales en Windows y macOS).
 
 ## Pruebas
 

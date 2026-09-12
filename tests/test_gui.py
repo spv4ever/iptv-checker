@@ -10,14 +10,11 @@ from iptv_checker.gui import (
     _apply_live_check,
     _check_live_channels,
     _channel_matches_filters,
-    _embedded_player_command,
     _filter_live_rows,
     _live_worker_count,
-    _maximize_player_window,
     _open_stream,
     _player_command,
     _save_available_account,
-    _send_windows_key,
     _set_live_filters_enabled,
 )
 from iptv_checker.playlist import Channel
@@ -151,67 +148,6 @@ class SavedAccountsViewTest(unittest.TestCase):
 
         which_mock.side_effect = lambda _name: None
         self.assertEqual(_player_command(), ("VLC", ["/opt/vlc"]))
-
-    @patch("iptv_checker.gui.shutil.which", return_value="/opt/mpv")
-    def test_builds_embedded_mpv_command_with_volume(self, _which_mock) -> None:
-        command, environment = _embedded_player_command("mpv", 12345, 72)
-
-        self.assertEqual(command[0], "/opt/mpv")
-        self.assertIn("--wid=12345", command)
-        self.assertIn("--volume=72", command)
-        self.assertIn("--no-fullscreen", command)
-        self.assertIn("--no-ontop", command)
-        self.assertIn("--keepaspect=yes", command)
-        self.assertIn("--video-unscaled=no", command)
-        self.assertIn("--panscan=0", command)
-        self.assertIn("--video-zoom=0", command)
-        self.assertNotIn("SDL_WINDOWID", environment)
-
-    @patch("iptv_checker.gui.sys.platform", "win32")
-    def test_maximizes_player_with_native_windows_state(self) -> None:
-        window = Mock()
-
-        _maximize_player_window(window)
-
-        window.state.assert_called_once_with("zoomed")
-        window.attributes.assert_not_called()
-
-    @patch("iptv_checker.gui.sys.platform", "linux")
-    def test_maximizes_player_with_window_manager_attribute(self) -> None:
-        window = Mock()
-
-        _maximize_player_window(window)
-
-        window.attributes.assert_called_once_with("-zoomed", True)
-        window.state.assert_not_called()
-
-    @patch("iptv_checker.gui.shutil.which", return_value="/opt/ffplay")
-    def test_builds_embedded_ffplay_environment(self, _which_mock) -> None:
-        command, environment = _embedded_player_command("ffplay", 987, 65, 800, 450)
-
-        self.assertEqual(command[-2:], ["-volume", "65"])
-        self.assertIn("-noborder", command)
-        self.assertEqual(command[command.index("-x"):command.index("-x") + 4],
-                         ["-x", "800", "-y", "450"])
-        self.assertEqual(environment["SDL_WINDOWID"], "987")
-
-    @patch("iptv_checker.gui.sys.platform", "win32")
-    def test_sends_ffplay_volume_keys_to_embedded_window(self) -> None:
-        with patch("ctypes.windll", create=True) as windll:
-            windll.user32.PostMessageW = Mock()
-
-            _send_windows_key(2468, "0", 2)
-
-        self.assertEqual(windll.user32.PostMessageW.call_count, 4)
-        self.assertEqual(
-            windll.user32.PostMessageW.call_args_list[0].args,
-            (2468, 0x0100, ord("0"), 0),
-        )
-
-    @patch("iptv_checker.gui.shutil.which", return_value=None)
-    def test_embedded_player_must_still_be_installed(self, _which_mock) -> None:
-        with self.assertRaisesRegex(OSError, "ya no está disponible"):
-            _embedded_player_command("mpv", 1, 80)
 
     def test_formats_saved_account_without_exposing_password(self) -> None:
         account = XtreamAccount(
