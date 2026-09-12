@@ -299,6 +299,13 @@ class XtreamDatabase:
             )
         return cursor.rowcount
 
+    def delete_all(self) -> int:
+        """Borra todas las cuentas almacenadas y devuelve cuántas eliminó."""
+
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM xtream_accounts")
+        return cursor.rowcount
+
 
 def _to_iso(value: datetime | None) -> str | None:
     if value is None:
