@@ -68,7 +68,9 @@ Haz doble clic en cualquier canal para abrir una ventana de reproducción
 integrada. La aplicación inicia automáticamente **mpv** y, si no está disponible
 o no puede arrancar, prueba **ffplay**. Incluye controles para reproducir,
 pausar/continuar, parar, ajustar el volumen y cerrar. La URL directa generada por
-Xtream ya contiene el usuario y la contraseña necesarios. Añade `mpv` o `ffplay`
+Xtream ya contiene el usuario y la contraseña necesarios. La ventana se abre
+maximizada y conserva la relación de aspecto para mostrar el vídeo completo sin
+recortarlo. Añade `mpv` o `ffplay`
 al `PATH`; en algunos entornos
 Wayland, la integración de ffplay depende de la compatibilidad XWayland/SDL del
 sistema, mientras que mpv es la opción recomendada. En Windows, si SDL no aplica

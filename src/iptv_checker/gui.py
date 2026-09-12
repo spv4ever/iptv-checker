@@ -724,8 +724,11 @@ class PlayerWindow(tk.Toplevel):
         players = _available_players()
 
         self.title(f"Reproductor — {channel_name}")
+        # El reproductor ocupa inicialmente toda el área de trabajo. Así el
+        # marco de vídeo recibe el mayor tamaño disponible sin quedar oculto
+        # detrás de la barra de tareas ni obligar al usuario a redimensionarlo.
         self.geometry("960x600")
-        self.minsize(640, 420)
+        self.minsize(480, 320)
         self.protocol("WM_DELETE_WINDOW", self.close)
 
         shell = ttk.Frame(self, padding=14)
@@ -765,7 +768,14 @@ class PlayerWindow(tk.Toplevel):
         ttk.Label(bar, text="Volumen").pack(side="right")
         self.status = ttk.Label(shell, text="Listo para reproducir", foreground="#5f6368")
         self.status.pack(anchor="w", pady=(7, 0))
-        self.after_idle(self.play)
+        # Maximizar antes de arrancar el motor es importante para ffplay: las
+        # dimensiones iniciales se pasan en su línea de comandos.
+        self.after_idle(self._maximize_and_play)
+
+    def _maximize_and_play(self) -> None:
+        _maximize_player_window(self)
+        self.update_idletasks()
+        self.play()
 
     def play(self) -> None:
         """Inicia el motor seleccionado dentro del lienzo de vídeo."""
@@ -924,7 +934,8 @@ def _embedded_player_command(
     environment = os.environ.copy()
     if engine == "mpv":
         return ([executable, f"--wid={window_id}", "--force-window=yes", "--no-fullscreen",
-                 "--no-ontop", "--input-terminal=yes",
+                 "--no-ontop", "--keepaspect=yes", "--video-unscaled=no",
+                 "--panscan=0", "--video-zoom=0", "--input-terminal=yes",
                  f"--volume={volume}"], environment)
     # SDL_WINDOWID hace que la ventana SDL de ffplay utilice el contenedor
     # nativo de Tk en plataformas compatibles (Windows y X11).
@@ -933,6 +944,25 @@ def _embedded_player_command(
             if width is not None and height is not None else [])
     return ([executable, "-autoexit", "-noborder", "-loglevel", "warning",
              *size, "-volume", str(volume)], environment)
+
+
+def _maximize_player_window(window: tk.Toplevel) -> None:
+    """Maximiza el reproductor usando el mecanismo nativo de cada plataforma."""
+
+    try:
+        if sys.platform == "win32":
+            # ``zoomed`` respeta el área útil de Windows (incluida la barra de
+            # tareas), a diferencia de construir una geometría con screenwidth.
+            window.state("zoomed")
+        else:
+            window.attributes("-zoomed", True)
+    except tk.TclError:
+        # Algunos gestores de ventanas no implementan el estado maximizado.
+        # En ese caso se usa casi toda la pantalla y se conserva un margen para
+        # poder mover o cerrar la ventana.
+        width = max(480, int(window.winfo_screenwidth() * .95))
+        height = max(320, int(window.winfo_screenheight() * .90))
+        window.geometry(f"{width}x{height}+0+0")
 
 
 def _embed_windows_process_window(
