@@ -52,13 +52,14 @@ contraseña no se muestra en esta vista.
 
 Haz doble clic en una cuenta de la ventana de la base de datos para consultar
 su estado actual y obtener desde `player_api.php` la lista de canales live. La
-aplicación **descarga y muestra primero la lista completa** y después comprueba
-cada URL de stream en segundo plano. Durante la comprobación, la tabla conserva
-únicamente los canales «Pendiente» y «Accesible»: los que resultan no accesibles
-desaparecen automáticamente. Los resultados se procesan por lotes y las pruebas
-de red se ejecutan en paralelo para mantener ágil la interfaz incluso con listas
-grandes. La revisión se puede detener desde esa misma ventana y la lista puede
-filtrarse simultáneamente por texto libre en el nombre del canal y por categoría.
+aplicación **descarga y muestra la lista completa sin iniciar la comprobación**.
+Puedes filtrar la tabla por nombre y categoría y pulsar **Iniciar comprobación**
+cuando hayas preparado la selección: sólo se revisan los canales visibles en ese
+momento. **Parar comprobación** permite detener el proceso. Durante la revisión,
+la tabla conserva únicamente los canales «Pendiente» y «Accesible»: los que
+resultan no accesibles desaparecen automáticamente. Los resultados se procesan
+por lotes y las pruebas de red se ejecutan en paralelo para mantener ágil la
+interfaz incluso con listas grandes.
 Al consultar los canales también se actualizan en SQLite el estado, la fecha de
 validación y la caducidad devuelta por la cuenta Xtream. El panel **Actividad** y
 el estado de la ventana de canales indican qué fase se está ejecutando.

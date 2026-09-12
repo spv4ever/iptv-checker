@@ -224,8 +224,8 @@ class CheckerApp(tk.Tk):
         table.pack(fill="both", expand=True)
         ttk.Label(
             container,
-            text=("La lista se descarga primero. Doble clic abre el canal con mpv, ffplay "
-                  "o VLC, incluso mientras se comprueba."),
+            text=("Filtra la lista y pulsa Iniciar comprobación. Sólo se revisarán los "
+                  "canales visibles. Doble clic abre un canal con mpv, ffplay o VLC."),
         ).pack(anchor="w", pady=(6, 0))
         channel_log = ttk.Label(container, text="Preparando descarga…")
         channel_log.pack(anchor="w", pady=(3, 0))
@@ -242,16 +242,22 @@ class CheckerApp(tk.Tk):
         )
         category_box.pack(side="left", padx=(5, 0))
         stop_event = Event()
+        check_running = False
 
         def request_stop() -> None:
+            if not check_running:
+                return
             stop_event.set()
             stop_button.state(["disabled"])
-            channel_log.configure(text="Deteniendo la revisión…")
+            channel_log.configure(text="Deteniendo la comprobación…")
 
-        stop_button = ttk.Button(filters, text="Parar revisión", command=request_stop)
+        stop_button = ttk.Button(filters, text="Parar comprobación", command=request_stop)
         stop_button.pack(side="right")
+        stop_button.state(["disabled"])
+        start_button = ttk.Button(filters, text="Iniciar comprobación")
+        start_button.pack(side="right", padx=(0, 6))
+        start_button.state(["disabled"])
         result_queue: Queue[tuple[str, object]] = Queue()
-        items_by_url: dict[str, list[str]] = {}
         all_channels: list[tuple[str, tuple[object, ...]]] = []
         channel_count = 0
         available_count = 0
@@ -260,15 +266,22 @@ class CheckerApp(tk.Tk):
         def apply_filters(*_args: object) -> None:
             name = channel_filter.get().casefold().strip()
             category = category_filter.get()
+            attached_items = set(table.get_children(""))
+            matching_items = {
+                item for item, _values in _filter_live_rows(all_channels, name, category)
+            }
             for item, values in all_channels:
-                visible = _channel_matches_filters(
-                    str(values[1]), str(values[2]), name, category
-                )
-                attached = bool(table.parent(item))
+                visible = item in matching_items
+                attached = item in attached_items
                 if visible and not attached:
                     table.reattach(item, "", "end")
                 elif not visible and attached:
                     table.detach(item)
+            if all_channels and not check_running:
+                visible_count = len(table.get_children(""))
+                channel_log.configure(
+                    text=f"{visible_count} de {len(all_channels)} canal(es) visibles."
+                )
 
         channel_filter.trace_add("write", apply_filters)
         category_box.bind("<<ComboboxSelected>>", apply_filters)
@@ -300,32 +313,65 @@ class CheckerApp(tk.Tk):
         def load() -> None:
             try:
                 details = XtreamClient(account).details()
-                # Publicar la lista antes de iniciar las pruebas evita que una
-                # lista grande parezca bloqueada durante varios minutos.
                 result_queue.put(("details", details))
-                checker = PlaylistChecker(
-                    timeout=8, workers=_live_worker_count(len(details.channels))
-                )
-                executor = ThreadPoolExecutor(max_workers=checker.workers)
-                try:
-                    futures = [
-                        executor.submit(checker.check, Channel(c.name, c.direct_url))
-                        for c in details.channels
-                    ]
-                    for future in as_completed(futures):
-                        if stop_event.is_set():
-                            for pending in futures:
-                                pending.cancel()
-                            result_queue.put(("stopped", details))
-                            return
-                        result_queue.put(("check", future.result()))
-                finally:
-                    executor.shutdown(wait=not stop_event.is_set(), cancel_futures=True)
-                result_queue.put(("done", details))
             except Exception as exc:  # Se comunica el error de la tarea al hilo de la interfaz.
                 result_queue.put(("error", exc))
 
+        def start_check() -> None:
+            nonlocal channel_count, available_count, checked_count, check_running
+            if check_running:
+                return
+            selected = [
+                (item, Channel(str(values[1]), str(values[5])))
+                for item, values in _filter_live_rows(
+                    all_channels, channel_filter.get(), category_filter.get()
+                )
+                if table.exists(item)
+            ]
+            if not selected:
+                messagebox.showinfo(
+                    "Sin canales",
+                    "El filtro actual no muestra ningún canal para comprobar.",
+                    parent=popup,
+                )
+                return
+            channel_count = len(selected)
+            available_count = 0
+            checked_count = 0
+            check_running = True
+            stop_event.clear()
+            for item, _channel in selected:
+                table.set(item, "availability", "Pendiente")
+                table.item(item, tags=())
+            start_button.state(["disabled"])
+            stop_button.state(["!disabled"])
+            channel_entry.state(["disabled"])
+            category_box.state(["disabled"])
+            channel_log.configure(text=f"Comprobando 0/{channel_count} canales visibles…")
+            Thread(target=check_selected, args=(selected,), daemon=True).start()
+
+        def check_selected(selected: list[tuple[str, Channel]]) -> None:
+            checker = PlaylistChecker(timeout=8, workers=_live_worker_count(len(selected)))
+            executor = ThreadPoolExecutor(max_workers=checker.workers)
+            futures = {
+                executor.submit(checker.check, channel): item for item, channel in selected
+            }
+            try:
+                for future in as_completed(futures):
+                    if stop_event.is_set():
+                        for pending in futures:
+                            pending.cancel()
+                        result_queue.put(("stopped", None))
+                        return
+                    result_queue.put(("check", (futures[future], future.result())))
+            finally:
+                executor.shutdown(wait=not stop_event.is_set(), cancel_futures=True)
+            result_queue.put(("done", None))
+
+        start_button.configure(command=start_check)
+
         def poll() -> None:
+            nonlocal check_running
             processed = 0
             while processed < LIVE_RESULTS_PER_POLL:
                 try:
@@ -339,26 +385,35 @@ class CheckerApp(tk.Tk):
                 if kind == "details":
                     show_list(payload)  # type: ignore[arg-type]
                 elif kind == "check":
-                    show_check(payload)  # type: ignore[arg-type]
+                    item, check = payload  # type: ignore[misc]
+                    show_check(item, check)
                 elif kind == "done":
+                    check_running = False
                     channel_log.configure(
                         text=(f"Comprobación finalizada: {available_count}/"
                               f"{channel_count} accesibles")
                     )
                     stop_button.state(["disabled"])
-                    return
+                    start_button.state(["!disabled"])
+                    channel_entry.state(["!disabled"])
+                    category_box.state(["readonly"])
                 elif kind == "stopped":
+                    check_running = False
                     channel_log.configure(
-                        text=f"Revisión detenida: {checked_count}/{channel_count} comprobados"
+                        text=f"Comprobación detenida: {checked_count}/{channel_count} comprobados"
                     )
                     stop_button.state(["disabled"])
-                    return
+                    start_button.state(["!disabled"])
+                    channel_entry.state(["!disabled"])
+                    category_box.state(["readonly"])
             if popup.winfo_exists():
                 popup.after(25 if processed else 100, poll)
 
         def failed(error: str) -> None:
             if popup.winfo_exists():
                 summary.configure(text=f"No se pudieron obtener los canales: {error}")
+                start_button.state(["disabled"])
+                stop_button.state(["disabled"])
             if account_table.winfo_exists():
                 account_table.set(account_item, "live", "Error")
 
@@ -381,7 +436,6 @@ class CheckerApp(tk.Tk):
                 item = table.insert(
                     "", "end", values=values,
                 )
-                items_by_url.setdefault(channel.direct_url, []).append(item)
                 all_channels.append((item, values))
             categories = sorted(
                 {channel.category_name for channel in details.channels}, key=str.casefold
@@ -392,7 +446,10 @@ class CheckerApp(tk.Tk):
                 text=(f"Estado: {details.status} · Caducidad: {_format_date(details.valid_until)} "
                       f"· Conexiones: {connections} · {channel_count} canal(es) descargados")
             )
-            channel_log.configure(text=f"Lista descargada. Comprobando 0/{channel_count} streams…")
+            channel_log.configure(
+                text=f"Lista descargada: {channel_count} canal(es). Aplica un filtro para comenzar."
+            )
+            start_button.state(["!disabled"])
             self._log(f"{account.server_name}: lista descargada ({channel_count} canales).")
             if account_table.winfo_exists():
                 account_table.set(account_item, "live", str(channel_count))
@@ -400,10 +457,8 @@ class CheckerApp(tk.Tk):
                 account_table.set(account_item, "validated", _account_row(account)[5])
                 account_table.set(account_item, "expires", _account_row(account)[6])
 
-        def show_check(check: CheckResult) -> None:
+        def show_check(item: str, check: CheckResult) -> None:
             nonlocal available_count, checked_count
-            items = items_by_url.get(check.channel.url, [])
-            item = items.pop(0) if items else None
             if not item or not table.exists(item):
                 return
             checked_count += 1
@@ -568,6 +623,20 @@ def _channel_matches_filters(
     return name_filter.casefold().strip() in name.casefold() and (
         category_filter == "Todas" or category == category_filter
     )
+
+
+def _filter_live_rows(
+    rows: list[tuple[str, tuple[object, ...]]], name_filter: str, category_filter: str
+) -> list[tuple[str, tuple[object, ...]]]:
+    """Selecciona las filas live que se muestran con los filtros actuales."""
+
+    return [
+        (item, values)
+        for item, values in rows
+        if _channel_matches_filters(
+            str(values[1]), str(values[2]), name_filter, category_filter
+        )
+    ]
 
 
 def _apply_live_check(table: ttk.Treeview, item: str, check: CheckResult) -> None:
