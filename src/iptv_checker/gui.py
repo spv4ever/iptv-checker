@@ -932,8 +932,30 @@ def _embed_windows_process_window(
     from ctypes import wintypes
 
     user32 = ctypes.windll.user32
+    # ctypes supone ``int`` cuando no se declara una firma. Eso trunca los HWND
+    # de 64 bits y hace que SetParent parezca ejecutarse aunque ffplay conserve
+    # su ventana independiente.
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.SetParent.argtypes = [wintypes.HWND, wintypes.HWND]
+    user32.SetParent.restype = wintypes.HWND
+    user32.GetParent.argtypes = [wintypes.HWND]
+    user32.GetParent.restype = wintypes.HWND
+    user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.GetWindowLongW.restype = ctypes.c_long
+    user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+    user32.SetWindowLongW.restype = ctypes.c_long
+    user32.SetWindowPos.argtypes = [
+        wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, wintypes.UINT,
+    ]
+    user32.SetWindowPos.restype = wintypes.BOOL
     matches: list[int] = []
     callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
 
     @callback_type
     def find_window(hwnd: int, _parameter: int) -> bool:
@@ -949,13 +971,24 @@ def _embed_windows_process_window(
         return None
 
     hwnd = matches[0]
+    user32.SetParent(hwnd, parent_id)
+    # SetParent no comunica bien el fallo cuando la ventana no tenía padre:
+    # en ambos casos devuelve NULL. GetParent permite verificar el resultado.
+    if int(user32.GetParent(hwnd) or 0) != parent_id:
+        return None
+
     style = user32.GetWindowLongW(hwnd, -16)  # GWL_STYLE
     # Quita los adornos de ventana superior y activa WS_CHILD.
     style &= ~0x80CF0000  # WS_POPUP | WS_CAPTION | WS_THICKFRAME | controles
     style |= 0x40000000  # WS_CHILD
     user32.SetWindowLongW(hwnd, -16, style)
-    user32.SetParent(hwnd, parent_id)
-    user32.MoveWindow(hwnd, 0, 0, max(1, width), max(1, height), True)
+    # SWP_FRAMECHANGED obliga a SDL/Windows a aplicar el nuevo estilo. Sin él,
+    # ffplay puede seguir dibujándose como una ventana superior aunque ya tenga
+    # asignado el marco Tk como padre.
+    user32.SetWindowPos(
+        hwnd, 0, 0, 0, max(1, width), max(1, height),
+        0x0020 | 0x0040,  # SWP_FRAMECHANGED | SWP_SHOWWINDOW
+    )
     return int(hwnd)
 
 
@@ -964,8 +997,15 @@ def _resize_windows_child(window_id: int, width: int, height: int) -> None:
 
     if sys.platform == "win32":
         import ctypes
+        from ctypes import wintypes
 
-        ctypes.windll.user32.MoveWindow(
+        move_window = ctypes.windll.user32.MoveWindow
+        move_window.argtypes = [
+            wintypes.HWND, ctypes.c_int, ctypes.c_int,
+            ctypes.c_int, ctypes.c_int, wintypes.BOOL,
+        ]
+        move_window.restype = wintypes.BOOL
+        move_window(
             window_id, 0, 0, max(1, width), max(1, height), True
         )
 
