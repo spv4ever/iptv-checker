@@ -52,14 +52,18 @@ contraseña no se muestra en esta vista.
 
 Haz doble clic en una cuenta de la ventana de la base de datos para consultar
 su estado actual y obtener desde `player_api.php` la lista de canales live. La
-aplicación comprueba además cada URL de stream en segundo plano, coloca primero
-los canales accesibles y muestra en la columna **Acceso** cuáles han respondido.
-La columna **Canales live** se actualiza con la cantidad accesible y el total
-recibido. Haz doble clic en un canal accesible para reproducirlo directamente
-en VLC. La aplicación entrega a VLC la URL directa generada por Xtream, que ya incluye el
-usuario y la contraseña necesarios, sin abrir el navegador. Para usar esta
-función debes tener VLC instalado; se detecta desde `PATH` y también en las
-ubicaciones habituales de Windows y macOS.
+aplicación **descarga y muestra primero la lista completa** y después comprueba
+cada URL de stream en segundo plano. La columna **Acceso** cambia de «Pendiente»
+a «Accesible» o «No accesible» a medida que llegan los resultados, sin congelar
+la ventana. El panel **Actividad** y el estado de la ventana de canales indican
+qué fase se está ejecutando.
+
+Haz doble clic en cualquier canal para reproducir su URL directa generada por
+Xtream, que ya incluye el usuario y la contraseña necesarios. El programa usa
+el primer reproductor disponible en este orden: **mpv**, **ffplay** y **VLC**.
+Esto permite reproducir aunque VLC no esté instalado o no funcione con un
+stream concreto. Añade al `PATH` al menos uno de ellos; VLC también se busca en
+sus ubicaciones habituales de Windows y macOS.
 
 ## Pruebas
 
