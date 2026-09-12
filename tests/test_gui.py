@@ -9,6 +9,7 @@ from iptv_checker.gui import (
     _account_row,
     _apply_live_check,
     _check_live_channels,
+    _embedded_player_command,
     _live_worker_count,
     _open_stream,
     _player_command,
@@ -102,6 +103,27 @@ class SavedAccountsViewTest(unittest.TestCase):
 
         which_mock.side_effect = lambda _name: None
         self.assertEqual(_player_command(), ("VLC", ["/opt/vlc"]))
+
+    @patch("iptv_checker.gui.shutil.which", return_value="/opt/mpv")
+    def test_builds_embedded_mpv_command_with_volume(self, _which_mock) -> None:
+        command, environment = _embedded_player_command("mpv", 12345, 72)
+
+        self.assertEqual(command[0], "/opt/mpv")
+        self.assertIn("--wid=12345", command)
+        self.assertIn("--volume=72", command)
+        self.assertNotIn("SDL_WINDOWID", environment)
+
+    @patch("iptv_checker.gui.shutil.which", return_value="/opt/ffplay")
+    def test_builds_embedded_ffplay_environment(self, _which_mock) -> None:
+        command, environment = _embedded_player_command("ffplay", 987, 65)
+
+        self.assertEqual(command[-2:], ["-volume", "65"])
+        self.assertEqual(environment["SDL_WINDOWID"], "987")
+
+    @patch("iptv_checker.gui.shutil.which", return_value=None)
+    def test_embedded_player_must_still_be_installed(self, _which_mock) -> None:
+        with self.assertRaisesRegex(OSError, "ya no está disponible"):
+            _embedded_player_command("mpv", 1, 80)
 
     def test_formats_saved_account_without_exposing_password(self) -> None:
         account = XtreamAccount(
