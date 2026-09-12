@@ -240,25 +240,22 @@ class CheckerApp(tk.Tk):
             if not item:
                 return
             direct_url = table.set(item, "url")
-            try:
-                player = _open_stream(direct_url)
-            except OSError as exc:
+            if not _available_players():
                 messagebox.showerror(
                     "No se pudo reproducir",
-                    f"No se pudo abrir el canal:\n{exc}",
-                    parent=popup,
-                )
-                return
-            if not player:
-                messagebox.showerror(
-                    "No se pudo reproducir",
-                    "No se encontró un reproductor compatible. Instala mpv, ffplay o VLC "
+                    "No se encontró un reproductor compatible. Instala mpv o ffplay "
                     "y añádelo al PATH.",
                     parent=popup,
                 )
             else:
-                channel_log.configure(
-                    text=f"Reproduciendo con {player}: {table.set(item, 'name')}"
+                # La ventana se presenta antes de iniciar el proceso. Así el
+                # usuario puede elegir el motor y la reproducción nunca se
+                # abre inesperadamente al hacer doble clic.
+                PlayerWindow(
+                    popup,
+                    direct_url,
+                    table.set(item, "name"),
+                    on_status=lambda status: channel_log.configure(text=status),
                 )
 
         table.bind("<Double-1>", play_channel)
@@ -540,6 +537,186 @@ def _open_stream(url: str) -> str | None:
         stderr=subprocess.DEVNULL,
     )
     return name
+
+
+class PlayerWindow(tk.Toplevel):
+    """Reproductor integrado con controles comunes para mpv y ffplay."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        url: str,
+        channel_name: str,
+        *,
+        on_status: object | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.url = normalize_url(url)
+        self.channel_name = channel_name
+        self.on_status = on_status
+        self.process: subprocess.Popen[bytes] | None = None
+        self.paused = False
+        players = _available_players()
+
+        self.title(f"Reproductor — {channel_name}")
+        self.geometry("960x600")
+        self.minsize(640, 420)
+        self.protocol("WM_DELETE_WINDOW", self.close)
+
+        shell = ttk.Frame(self, padding=14)
+        shell.pack(fill="both", expand=True)
+        header = ttk.Frame(shell)
+        header.pack(fill="x", pady=(0, 10))
+        ttk.Label(header, text=channel_name, font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        ttk.Label(header, text="Reproducción integrada", foreground="#5f6368").pack(anchor="w")
+
+        self.video = tk.Frame(shell, background="#101216", highlightthickness=1)
+        self.video.pack(fill="both", expand=True)
+        self.placeholder = tk.Label(
+            self.video,
+            text="Selecciona un motor y pulsa Reproducir",
+            background="#101216",
+            foreground="#d7dbe0",
+            font=("Segoe UI", 12),
+        )
+        self.placeholder.place(relx=.5, rely=.5, anchor="center")
+
+        bar = ttk.Frame(shell)
+        bar.pack(fill="x", pady=(10, 0))
+        self.engine = tk.StringVar(value=players[0][0])
+        ttk.Label(bar, text="Motor:").pack(side="left")
+        self.engine_box = ttk.Combobox(
+            bar, state="readonly", width=9, textvariable=self.engine,
+            values=[name for name, _command in players],
+        )
+        self.engine_box.pack(side="left", padx=(5, 12))
+        self.play_button = ttk.Button(bar, text="▶ Reproducir", command=self.play)
+        self.play_button.pack(side="left")
+        self.pause_button = ttk.Button(bar, text="⏸ Pausar", command=self.toggle_pause)
+        self.pause_button.pack(side="left", padx=6)
+        ttk.Button(bar, text="⏹ Parar", command=self.stop).pack(side="left")
+        ttk.Button(bar, text="Cerrar", command=self.close).pack(side="right")
+
+        self.volume = tk.DoubleVar(value=80)
+        ttk.Scale(bar, from_=0, to=100, variable=self.volume, command=self.set_volume).pack(
+            side="right", padx=(6, 12)
+        )
+        ttk.Label(bar, text="Volumen").pack(side="right")
+        self.status = ttk.Label(shell, text="Listo para reproducir", foreground="#5f6368")
+        self.status.pack(anchor="w", pady=(7, 0))
+
+    def play(self) -> None:
+        """Inicia el motor seleccionado dentro del lienzo de vídeo."""
+
+        self.stop(update_status=False)
+        self.update_idletasks()
+        command, environment = _embedded_player_command(
+            self.engine.get(), self.video.winfo_id(), int(self.volume.get())
+        )
+        try:
+            self.process = subprocess.Popen(
+                [*command, self.url], stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment,
+            )
+        except OSError as exc:
+            messagebox.showerror("No se pudo reproducir", str(exc), parent=self)
+            self._set_status("No se pudo iniciar el reproductor")
+            return
+        self.placeholder.place_forget()
+        self.paused = False
+        self.pause_button.configure(text="⏸ Pausar")
+        self._set_status(f"Reproduciendo con {self.engine.get()}: {self.channel_name}")
+        self.after(500, self._watch_process)
+
+    def toggle_pause(self) -> None:
+        if not self._running():
+            return
+        self.paused = not self.paused
+        if self.engine.get() == "mpv":
+            self._write_command(f"set pause {'yes' if self.paused else 'no'}\n")
+        else:
+            self._write_command("p")
+        self.pause_button.configure(text="▶ Continuar" if self.paused else "⏸ Pausar")
+        self._set_status("En pausa" if self.paused else f"Reproduciendo: {self.channel_name}")
+
+    def set_volume(self, value: str) -> None:
+        if not self._running():
+            return
+        volume = max(0, min(100, int(float(value))))
+        if self.engine.get() == "mpv":
+            self._write_command(f"set volume {volume}\n")
+        else:
+            # ffplay sólo expone ajustes incrementales durante la ejecución.
+            previous = getattr(self, "_ffplay_volume", 80)
+            key = "0" if volume > previous else "9"
+            for _ in range(abs(volume - previous) // 5):
+                self._write_command(key)
+            self._ffplay_volume = volume
+
+    def stop(self, *, update_status: bool = True) -> None:
+        if self._running():
+            self._write_command("quit\n" if self.engine.get() == "mpv" else "q")
+            if self.process and self.process.poll() is None:
+                self.process.terminate()
+        self.process = None
+        self.paused = False
+        if update_status:
+            self.placeholder.place(relx=.5, rely=.5, anchor="center")
+            self._set_status("Reproducción detenida")
+
+    def close(self) -> None:
+        self.stop(update_status=False)
+        self.destroy()
+
+    def _running(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def _write_command(self, command: str) -> None:
+        try:
+            if self.process and self.process.stdin:
+                self.process.stdin.write(command.encode())
+                self.process.stdin.flush()
+        except (BrokenPipeError, OSError):
+            self._set_status("El reproductor dejó de responder")
+
+    def _watch_process(self) -> None:
+        if self._running():
+            self.after(500, self._watch_process)
+        elif self.winfo_exists() and self.process is not None:
+            self.process = None
+            self.placeholder.place(relx=.5, rely=.5, anchor="center")
+            self._set_status("La reproducción ha finalizado")
+
+    def _set_status(self, text: str) -> None:
+        self.status.configure(text=text)
+        if callable(self.on_status):
+            self.on_status(text)
+
+
+def _available_players() -> list[tuple[str, str]]:
+    """Devuelve los motores que admiten integración en la ventana."""
+
+    return [(name, executable) for name in ("mpv", "ffplay")
+            if (executable := shutil.which(name))]
+
+
+def _embedded_player_command(
+    engine: str, window_id: int, volume: int
+) -> tuple[list[str], dict[str, str]]:
+    """Construye el comando y entorno para alojar vídeo en un widget Tk."""
+
+    executable = shutil.which(engine)
+    if not executable or engine not in {"mpv", "ffplay"}:
+        raise OSError(f"El motor {engine!r} ya no está disponible")
+    environment = os.environ.copy()
+    if engine == "mpv":
+        return ([executable, f"--wid={window_id}", "--force-window=yes", "--input-terminal=yes",
+                 f"--volume={volume}"], environment)
+    # SDL_WINDOWID hace que la ventana SDL de ffplay utilice el contenedor
+    # nativo de Tk en plataformas compatibles (Windows y X11).
+    environment["SDL_WINDOWID"] = str(window_id)
+    return ([executable, "-autoexit", "-loglevel", "warning", "-volume", str(volume)],
+            environment)
 
 
 def _player_command() -> tuple[str, list[str]] | None:

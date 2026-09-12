@@ -60,12 +60,14 @@ de red se ejecutan en paralelo para mantener ágil la interfaz incluso con lista
 grandes. El panel **Actividad** y el estado de la ventana de canales indican qué
 fase se está ejecutando.
 
-Haz doble clic en cualquier canal para reproducir su URL directa generada por
-Xtream, que ya incluye el usuario y la contraseña necesarios. El programa usa
-el primer reproductor disponible en este orden: **mpv**, **ffplay** y **VLC**.
-Esto permite reproducir aunque VLC no esté instalado o no funcione con un
-stream concreto. Añade al `PATH` al menos uno de ellos; VLC también se busca en
-sus ubicaciones habituales de Windows y macOS.
+Haz doble clic en cualquier canal para abrir primero una ventana de reproducción
+profesional, sin iniciar el stream de forma inesperada. En ella puedes elegir
+**mpv** o **ffplay**, pulsar **Reproducir** y ver el vídeo integrado en la propia
+aplicación. Incluye controles para reproducir, pausar/continuar, parar, ajustar
+el volumen y cerrar. La URL directa generada por Xtream ya contiene el usuario y
+la contraseña necesarios. Añade `mpv` o `ffplay` al `PATH`; en algunos entornos
+Wayland, la integración de ffplay depende de la compatibilidad XWayland/SDL del
+sistema, mientras que mpv es la opción recomendada.
 
 ## Pruebas
 
