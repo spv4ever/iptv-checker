@@ -57,15 +57,18 @@ cada URL de stream en segundo plano. Durante la comprobación, la tabla conserva
 únicamente los canales «Pendiente» y «Accesible»: los que resultan no accesibles
 desaparecen automáticamente. Los resultados se procesan por lotes y las pruebas
 de red se ejecutan en paralelo para mantener ágil la interfaz incluso con listas
-grandes. El panel **Actividad** y el estado de la ventana de canales indican qué
-fase se está ejecutando.
+grandes. La revisión se puede detener desde esa misma ventana y la lista puede
+filtrarse simultáneamente por texto libre en el nombre del canal y por categoría.
+Al consultar los canales también se actualizan en SQLite el estado, la fecha de
+validación y la caducidad devuelta por la cuenta Xtream. El panel **Actividad** y
+el estado de la ventana de canales indican qué fase se está ejecutando.
 
-Haz doble clic en cualquier canal para abrir primero una ventana de reproducción
-profesional, sin iniciar el stream de forma inesperada. En ella puedes elegir
-**mpv** o **ffplay**, pulsar **Reproducir** y ver el vídeo integrado en la propia
-aplicación. Incluye controles para reproducir, pausar/continuar, parar, ajustar
-el volumen y cerrar. La URL directa generada por Xtream ya contiene el usuario y
-la contraseña necesarios. Añade `mpv` o `ffplay` al `PATH`; en algunos entornos
+Haz doble clic en cualquier canal para abrir una ventana de reproducción
+integrada. La aplicación inicia automáticamente **mpv** y, si no está disponible
+o no puede arrancar, prueba **ffplay**. Incluye controles para reproducir,
+pausar/continuar, parar, ajustar el volumen y cerrar. La URL directa generada por
+Xtream ya contiene el usuario y la contraseña necesarios. Añade `mpv` o `ffplay`
+al `PATH`; en algunos entornos
 Wayland, la integración de ffplay depende de la compatibilidad XWayland/SDL del
 sistema, mientras que mpv es la opción recomendada.
 
