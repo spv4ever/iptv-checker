@@ -780,7 +780,11 @@ class PlayerWindow(tk.Toplevel):
             self.engine.set(engine)
             try:
                 command, environment = _embedded_player_command(
-                    engine, self.video.winfo_id(), int(self.volume.get())
+                    engine,
+                    self.video.winfo_id(),
+                    int(self.volume.get()),
+                    self.video.winfo_width(),
+                    self.video.winfo_height(),
                 )
                 self.process = subprocess.Popen(
                     [*command, self.url], stdin=subprocess.PIPE,
@@ -792,6 +796,8 @@ class PlayerWindow(tk.Toplevel):
                     # incorpora su HWND explícitamente en cuanto sea creado.
                     self._embed_attempts = 0
                     self.after(50, self._attach_ffplay_window)
+                if engine == "ffplay":
+                    self._ffplay_volume = int(self.volume.get())
                 break
             except OSError as exc:
                 errors.append(f"{engine}: {exc}")
@@ -824,10 +830,14 @@ class PlayerWindow(tk.Toplevel):
             self._write_command(f"set volume {volume}\n")
         else:
             # ffplay sólo expone ajustes incrementales durante la ejecución.
-            previous = getattr(self, "_ffplay_volume", 80)
+            previous = getattr(self, "_ffplay_volume", volume)
             key = "0" if volume > previous else "9"
-            for _ in range(abs(volume - previous) // 5):
-                self._write_command(key)
+            presses = abs(volume - previous) // 5
+            if self.embedded_window is not None and sys.platform == "win32":
+                _send_windows_key(self.embedded_window, key, presses)
+            else:
+                for _ in range(presses):
+                    self._write_command(key)
             self._ffplay_volume = volume
 
     def stop(self, *, update_status: bool = True) -> None:
@@ -900,7 +910,11 @@ def _available_players() -> list[tuple[str, str]]:
 
 
 def _embedded_player_command(
-    engine: str, window_id: int, volume: int
+    engine: str,
+    window_id: int,
+    volume: int,
+    width: int | None = None,
+    height: int | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Construye el comando y entorno para alojar vídeo en un widget Tk."""
 
@@ -915,9 +929,10 @@ def _embedded_player_command(
     # SDL_WINDOWID hace que la ventana SDL de ffplay utilice el contenedor
     # nativo de Tk en plataformas compatibles (Windows y X11).
     environment["SDL_WINDOWID"] = str(window_id)
+    size = (["-x", str(max(1, width)), "-y", str(max(1, height))]
+            if width is not None and height is not None else [])
     return ([executable, "-autoexit", "-noborder", "-loglevel", "warning",
-             "-volume", str(volume)],
-            environment)
+             *size, "-volume", str(volume)], environment)
 
 
 def _embed_windows_process_window(
@@ -1005,9 +1020,39 @@ def _resize_windows_child(window_id: int, width: int, height: int) -> None:
             ctypes.c_int, ctypes.c_int, wintypes.BOOL,
         ]
         move_window.restype = wintypes.BOOL
-        move_window(
-            window_id, 0, 0, max(1, width), max(1, height), True
-        )
+        width = max(1, width)
+        height = max(1, height)
+        move_window(window_id, 0, 0, width, height, True)
+
+        # MoveWindow cambia el contenedor nativo, pero algunas versiones de SDL
+        # no actualizan el renderer de ffplay después de SetParent. Notificar el
+        # nuevo área cliente fuerza que la imagen también se vuelva a escalar.
+        send_message = ctypes.windll.user32.SendMessageW
+        send_message.argtypes = [
+            wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+        ]
+        send_message.restype = wintypes.LRESULT
+        send_message(window_id, 0x0005, 0, (height << 16) | (width & 0xFFFF))  # WM_SIZE
+
+
+def _send_windows_key(window_id: int, key: str, presses: int) -> None:
+    """Envía a ffplay teclas de volumen aunque no tenga el foco del teclado."""
+
+    if sys.platform != "win32" or presses <= 0:
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    virtual_key = ord(key)
+    post_message = ctypes.windll.user32.PostMessageW
+    post_message.argtypes = [
+        wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+    ]
+    post_message.restype = wintypes.BOOL
+    for _ in range(presses):
+        post_message(window_id, 0x0100, virtual_key, 0)  # WM_KEYDOWN
+        post_message(window_id, 0x0101, virtual_key, 0)  # WM_KEYUP
 
 
 def _player_command() -> tuple[str, list[str]] | None:
