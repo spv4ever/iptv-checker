@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iptv-checker"
+version = "0.1.0"
+description = "Comprobador concurrente de listas IPTV M3U"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[project.scripts]
+iptv-checker = "iptv_checker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
