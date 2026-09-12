@@ -12,7 +12,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-from threading import Thread
+from threading import Event, Thread
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -229,11 +229,49 @@ class CheckerApp(tk.Tk):
         ).pack(anchor="w", pady=(6, 0))
         channel_log = ttk.Label(container, text="Preparando descarga…")
         channel_log.pack(anchor="w", pady=(3, 0))
+        filters = ttk.Frame(container)
+        filters.pack(fill="x", pady=(8, 4), before=table)
+        channel_filter = tk.StringVar()
+        category_filter = tk.StringVar(value="Todas")
+        ttk.Label(filters, text="Canal:").pack(side="left")
+        channel_entry = ttk.Entry(filters, textvariable=channel_filter, width=28)
+        channel_entry.pack(side="left", padx=(5, 14))
+        ttk.Label(filters, text="Categoría:").pack(side="left")
+        category_box = ttk.Combobox(
+            filters, state="readonly", textvariable=category_filter, values=("Todas",), width=24
+        )
+        category_box.pack(side="left", padx=(5, 0))
+        stop_event = Event()
+
+        def request_stop() -> None:
+            stop_event.set()
+            stop_button.state(["disabled"])
+            channel_log.configure(text="Deteniendo la revisión…")
+
+        stop_button = ttk.Button(filters, text="Parar revisión", command=request_stop)
+        stop_button.pack(side="right")
         result_queue: Queue[tuple[str, object]] = Queue()
         items_by_url: dict[str, list[str]] = {}
+        all_channels: list[tuple[str, tuple[object, ...]]] = []
         channel_count = 0
         available_count = 0
         checked_count = 0
+
+        def apply_filters(*_args: object) -> None:
+            name = channel_filter.get().casefold().strip()
+            category = category_filter.get()
+            for item, values in all_channels:
+                visible = _channel_matches_filters(
+                    str(values[1]), str(values[2]), name, category
+                )
+                attached = bool(table.parent(item))
+                if visible and not attached:
+                    table.reattach(item, "", "end")
+                elif not visible and attached:
+                    table.detach(item)
+
+        channel_filter.trace_add("write", apply_filters)
+        category_box.bind("<<ComboboxSelected>>", apply_filters)
 
         def play_channel(event: tk.Event[tk.Misc]) -> None:
             item = table.identify_row(event.y)
@@ -248,9 +286,8 @@ class CheckerApp(tk.Tk):
                     parent=popup,
                 )
             else:
-                # La ventana se presenta antes de iniciar el proceso. Así el
-                # usuario puede elegir el motor y la reproducción nunca se
-                # abre inesperadamente al hacer doble clic.
+                # La ventana integrada elige automáticamente el primer motor
+                # disponible, respetando la prioridad mpv -> ffplay.
                 PlayerWindow(
                     popup,
                     direct_url,
@@ -269,13 +306,21 @@ class CheckerApp(tk.Tk):
                 checker = PlaylistChecker(
                     timeout=8, workers=_live_worker_count(len(details.channels))
                 )
-                with ThreadPoolExecutor(max_workers=checker.workers) as executor:
+                executor = ThreadPoolExecutor(max_workers=checker.workers)
+                try:
                     futures = [
                         executor.submit(checker.check, Channel(c.name, c.direct_url))
                         for c in details.channels
                     ]
                     for future in as_completed(futures):
+                        if stop_event.is_set():
+                            for pending in futures:
+                                pending.cancel()
+                            result_queue.put(("stopped", details))
+                            return
                         result_queue.put(("check", future.result()))
+                finally:
+                    executor.shutdown(wait=not stop_event.is_set(), cancel_futures=True)
                 result_queue.put(("done", details))
             except Exception as exc:  # Se comunica el error de la tarea al hilo de la interfaz.
                 result_queue.put(("error", exc))
@@ -300,6 +345,13 @@ class CheckerApp(tk.Tk):
                         text=(f"Comprobación finalizada: {available_count}/"
                               f"{channel_count} accesibles")
                     )
+                    stop_button.state(["disabled"])
+                    return
+                elif kind == "stopped":
+                    channel_log.configure(
+                        text=f"Revisión detenida: {checked_count}/{channel_count} comprobados"
+                    )
+                    stop_button.state(["disabled"])
                     return
             if popup.winfo_exists():
                 popup.after(25 if processed else 100, poll)
@@ -311,17 +363,30 @@ class CheckerApp(tk.Tk):
                 account_table.set(account_item, "live", "Error")
 
         def show_list(details: XtreamDetails) -> None:
-            nonlocal channel_count
+            nonlocal channel_count, account
             if not popup.winfo_exists():
                 return
             channel_count = len(details.channels)
+            account = replace(
+                account, is_valid=details.status.casefold() == "active",
+                validated_at=datetime.now(timezone.utc), valid_until=details.valid_until,
+            )
+            try:
+                XtreamDatabase(self.database_path).save(account)
+            except (OSError, sqlite3.Error) as exc:
+                self._log(f"No se pudo actualizar la validez de {account.server_name}: {exc}")
             for channel in details.channels:
+                values = (channel.stream_id, channel.name, channel.category_name,
+                          channel.container_extension, "Pendiente", channel.direct_url)
                 item = table.insert(
-                    "", "end",
-                    values=(channel.stream_id, channel.name, channel.category_name,
-                            channel.container_extension, "Pendiente", channel.direct_url),
+                    "", "end", values=values,
                 )
                 items_by_url.setdefault(channel.direct_url, []).append(item)
+                all_channels.append((item, values))
+            categories = sorted(
+                {channel.category_name for channel in details.channels}, key=str.casefold
+            )
+            category_box.configure(values=("Todas", *categories))
             connections = _format_connections(details.active_connections, details.max_connections)
             summary.configure(
                 text=(f"Estado: {details.status} · Caducidad: {_format_date(details.valid_until)} "
@@ -331,6 +396,9 @@ class CheckerApp(tk.Tk):
             self._log(f"{account.server_name}: lista descargada ({channel_count} canales).")
             if account_table.winfo_exists():
                 account_table.set(account_item, "live", str(channel_count))
+                account_table.set(account_item, "status", _account_row(account)[3])
+                account_table.set(account_item, "validated", _account_row(account)[5])
+                account_table.set(account_item, "expires", _account_row(account)[6])
 
         def show_check(check: CheckResult) -> None:
             nonlocal available_count, checked_count
@@ -342,10 +410,15 @@ class CheckerApp(tk.Tk):
             if check.available:
                 available_count += 1
             _apply_live_check(table, item, check)
+            if not check.available:
+                all_channels[:] = [row for row in all_channels if row[0] != item]
+            else:
+                apply_filters()
             channel_log.configure(
                 text=f"Comprobando {checked_count}/{channel_count}: {check.channel.name}"
             )
 
+        popup.protocol("WM_DELETE_WINDOW", lambda: (stop_event.set(), popup.destroy()))
         Thread(target=load, daemon=True).start()
         popup.after(100, poll)
 
@@ -487,6 +560,16 @@ def _live_worker_count(channel_count: int) -> int:
     return min(LIVE_CHECK_WORKERS, max(1, channel_count))
 
 
+def _channel_matches_filters(
+    name: str, category: str, name_filter: str, category_filter: str
+) -> bool:
+    """Indica si un canal coincide con el texto libre y la categoría."""
+
+    return name_filter.casefold().strip() in name.casefold() and (
+        category_filter == "Todas" or category == category_filter
+    )
+
+
 def _apply_live_check(table: ttk.Treeview, item: str, check: CheckResult) -> None:
     """Conserva en la tabla sólo resultados pendientes o accesibles."""
 
@@ -574,7 +657,7 @@ class PlayerWindow(tk.Toplevel):
         self.video.pack(fill="both", expand=True)
         self.placeholder = tk.Label(
             self.video,
-            text="Selecciona un motor y pulsa Reproducir",
+            text="Iniciando reproducción…",
             background="#101216",
             foreground="#d7dbe0",
             font=("Segoe UI", 12),
@@ -583,13 +666,8 @@ class PlayerWindow(tk.Toplevel):
 
         bar = ttk.Frame(shell)
         bar.pack(fill="x", pady=(10, 0))
-        self.engine = tk.StringVar(value=players[0][0])
-        ttk.Label(bar, text="Motor:").pack(side="left")
-        self.engine_box = ttk.Combobox(
-            bar, state="readonly", width=9, textvariable=self.engine,
-            values=[name for name, _command in players],
-        )
-        self.engine_box.pack(side="left", padx=(5, 12))
+        self.players = [name for name, _command in players]
+        self.engine = tk.StringVar(value=self.players[0])
         self.play_button = ttk.Button(bar, text="▶ Reproducir", command=self.play)
         self.play_button.pack(side="left")
         self.pause_button = ttk.Button(bar, text="⏸ Pausar", command=self.toggle_pause)
@@ -604,23 +682,33 @@ class PlayerWindow(tk.Toplevel):
         ttk.Label(bar, text="Volumen").pack(side="right")
         self.status = ttk.Label(shell, text="Listo para reproducir", foreground="#5f6368")
         self.status.pack(anchor="w", pady=(7, 0))
+        self.after_idle(self.play)
 
     def play(self) -> None:
         """Inicia el motor seleccionado dentro del lienzo de vídeo."""
 
         self.stop(update_status=False)
         self.update_idletasks()
-        command, environment = _embedded_player_command(
-            self.engine.get(), self.video.winfo_id(), int(self.volume.get())
-        )
-        try:
-            self.process = subprocess.Popen(
-                [*command, self.url], stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment,
-            )
-        except OSError as exc:
-            messagebox.showerror("No se pudo reproducir", str(exc), parent=self)
-            self._set_status("No se pudo iniciar el reproductor")
+        errors: list[str] = []
+        # El orden de _available_players es deliberado: mpv es la primera
+        # opción y ffplay actúa automáticamente como respaldo.
+        start = self.players.index(self.engine.get()) if self.engine.get() in self.players else 0
+        for engine in self.players[start:]:
+            self.engine.set(engine)
+            try:
+                command, environment = _embedded_player_command(
+                    engine, self.video.winfo_id(), int(self.volume.get())
+                )
+                self.process = subprocess.Popen(
+                    [*command, self.url], stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment,
+                )
+                break
+            except OSError as exc:
+                errors.append(f"{engine}: {exc}")
+        else:
+            messagebox.showerror("No se pudo reproducir", "\n".join(errors), parent=self)
+            self._set_status("No se pudo iniciar ningún reproductor")
             return
         self.placeholder.place_forget()
         self.paused = False

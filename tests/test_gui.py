@@ -9,6 +9,7 @@ from iptv_checker.gui import (
     _account_row,
     _apply_live_check,
     _check_live_channels,
+    _channel_matches_filters,
     _embedded_player_command,
     _live_worker_count,
     _open_stream,
@@ -20,6 +21,20 @@ from iptv_checker.xtream import XtreamAccount, XtreamChannel, XtreamDatabase, Xt
 
 
 class SavedAccountsViewTest(unittest.TestCase):
+    def test_filters_channels_by_free_text_and_category(self) -> None:
+        self.assertTrue(
+            _channel_matches_filters("Canal Noticias HD", "España", "noticias", "Todas")
+        )
+        self.assertTrue(
+            _channel_matches_filters("Canal Noticias HD", "España", "CANAL", "España")
+        )
+        self.assertFalse(
+            _channel_matches_filters("Canal Noticias HD", "España", "cine", "Todas")
+        )
+        self.assertFalse(
+            _channel_matches_filters("Canal Noticias HD", "España", "canal", "México")
+        )
+
     def test_removes_unavailable_channels_from_the_live_table(self) -> None:
         table = Mock()
         result = CheckResult(Channel("Caído", "http://tv.example/1"), False, 404, 5)
