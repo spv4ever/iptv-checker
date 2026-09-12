@@ -345,8 +345,7 @@ class CheckerApp(tk.Tk):
                 table.item(item, tags=())
             start_button.state(["disabled"])
             stop_button.state(["!disabled"])
-            channel_entry.state(["disabled"])
-            category_box.state(["disabled"])
+            _set_live_filters_enabled(channel_entry, category_box, enabled=False)
             channel_log.configure(text=f"Comprobando 0/{channel_count} canales visibles…")
             Thread(target=check_selected, args=(selected,), daemon=True).start()
 
@@ -395,8 +394,7 @@ class CheckerApp(tk.Tk):
                     )
                     stop_button.state(["disabled"])
                     start_button.state(["!disabled"])
-                    channel_entry.state(["!disabled"])
-                    category_box.state(["readonly"])
+                    _set_live_filters_enabled(channel_entry, category_box, enabled=True)
                 elif kind == "stopped":
                     check_running = False
                     channel_log.configure(
@@ -404,8 +402,7 @@ class CheckerApp(tk.Tk):
                     )
                     stop_button.state(["disabled"])
                     start_button.state(["!disabled"])
-                    channel_entry.state(["!disabled"])
-                    category_box.state(["readonly"])
+                    _set_live_filters_enabled(channel_entry, category_box, enabled=True)
             if popup.winfo_exists():
                 popup.after(25 if processed else 100, poll)
 
@@ -613,6 +610,20 @@ def _live_worker_count(channel_count: int) -> int:
     """Dimensiona las comprobaciones de red sin crear hilos innecesarios."""
 
     return min(LIVE_CHECK_WORKERS, max(1, channel_count))
+
+
+def _set_live_filters_enabled(
+    channel_entry: ttk.Entry, category_box: ttk.Combobox, *, enabled: bool
+) -> None:
+    """Activa o bloquea los filtros mientras se comprueban canales live."""
+
+    if enabled:
+        channel_entry.state(["!disabled"])
+        # Añadir ``readonly`` no elimina por sí solo el estado ``disabled`` de ttk.
+        category_box.state(["!disabled", "readonly"])
+    else:
+        channel_entry.state(["disabled"])
+        category_box.state(["disabled"])
 
 
 def _channel_matches_filters(

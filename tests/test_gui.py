@@ -16,12 +16,31 @@ from iptv_checker.gui import (
     _open_stream,
     _player_command,
     _save_available_account,
+    _set_live_filters_enabled,
 )
 from iptv_checker.playlist import Channel
 from iptv_checker.xtream import XtreamAccount, XtreamChannel, XtreamDatabase, XtreamDetails
 
 
 class SavedAccountsViewTest(unittest.TestCase):
+    def test_reenables_category_filter_after_live_check_finishes(self) -> None:
+        channel_entry = Mock()
+        category_box = Mock()
+
+        _set_live_filters_enabled(channel_entry, category_box, enabled=True)
+
+        channel_entry.state.assert_called_once_with(["!disabled"])
+        category_box.state.assert_called_once_with(["!disabled", "readonly"])
+
+    def test_disables_live_filters_while_check_is_running(self) -> None:
+        channel_entry = Mock()
+        category_box = Mock()
+
+        _set_live_filters_enabled(channel_entry, category_box, enabled=False)
+
+        channel_entry.state.assert_called_once_with(["disabled"])
+        category_box.state.assert_called_once_with(["disabled"])
+
     def test_selects_only_live_rows_matching_both_filters(self) -> None:
         rows = [
             ("row-1", (1, "Noticias 24", "España", "ts", "Pendiente", "http://one")),
