@@ -9,7 +9,9 @@ from .xtream import (
     XtreamClient,
     XtreamDatabase,
     XtreamDetails,
+    account_guid,
     parse_xtream_url,
+    xtream_playlist_url,
 )
 
 __all__ = [
@@ -23,6 +25,8 @@ __all__ = [
     "XtreamClient",
     "XtreamDatabase",
     "XtreamDetails",
+    "account_guid",
     "parse_m3u",
     "parse_xtream_url",
+    "xtream_playlist_url",
 ]

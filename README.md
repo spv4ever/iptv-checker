@@ -13,9 +13,10 @@ python app.py
 
 También puedes abrir `iniciar.bat` con doble clic.
 
-Pega una URL `http://` o `https://` por línea y pulsa **Comprobar**. La tabla
-mostrará si cada dirección está disponible, su código HTTP y el tiempo de
-respuesta.
+Pega una URL Xtream `http://` o `https://` por línea y pulsa **Guardar
+pendientes**. Esta primera fase sólo valida el formato y guarda las cuentas, sin
+conectarse a ningún servidor. Después, **Validar siguiente lote** comprueba como
+máximo las cinco primeras cuentas pendientes de cada servidor.
 
 Requiere Python 3.10 o posterior. La interfaz utiliza Tkinter, incluido en la
 instalación normal de Python para Windows.
@@ -24,8 +25,10 @@ instalación normal de Python para Windows.
 
 El paquete incluye una base SQLite para guardar los datos de acceso ya
 segmentados: nombre del servidor, URL base normalizada, usuario, contraseña,
-estado de validez, fecha de la última validación y fecha de caducidad. Las
-altas son idempotentes por URL y usuario.
+estado de validez (incluido **Pendiente sin validar**), fecha de la última
+validación y fecha de caducidad. Cada combinación exacta de servidor, usuario y
+contraseña tiene un GUID determinista: volver a pegar la misma información no
+crea otra alta ni devuelve una cuenta ya validada al estado pendiente.
 
 ```python
 from iptv_checker import XtreamDatabase, parse_xtream_url
@@ -46,9 +49,10 @@ POSIX y no debe compartirse ni añadirse al control de versiones.
 Desde la aplicación gráfica también puedes pulsar **Base de datos guardados**
 para consultar las cuentas almacenadas, su estado y sus fechas de validación y
 caducidad. Cada URL Xtream que termina la comprobación con resultado disponible
-se guarda automáticamente como válida, junto con la fecha de validación. Las
-URLs genéricas que no contienen usuario y contraseña sólo se comprueban. La
-contraseña no se muestra en esta vista.
+queda guardada primero como pendiente. La validación posterior se realiza en
+paquetes independientes de hasta cinco cuentas por servidor. Las URLs genéricas
+que no contienen usuario y contraseña se ignoran porque no permiten crear una
+cuenta Xtream. La contraseña no se muestra en esta vista.
 
 Haz doble clic en una cuenta de la ventana de la base de datos para consultar
 su estado actual y obtener desde `player_api.php` la lista de canales live. La

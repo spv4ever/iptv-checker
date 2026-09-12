@@ -18,7 +18,14 @@ from tkinter import messagebox, ttk
 
 from .checker import CheckResult, PlaylistChecker
 from .playlist import Channel, normalize_url, parse_urls
-from .xtream import XtreamAccount, XtreamClient, XtreamDatabase, XtreamDetails, parse_xtream_url
+from .xtream import (
+    XtreamAccount,
+    XtreamClient,
+    XtreamDatabase,
+    XtreamDetails,
+    parse_xtream_url,
+    xtream_playlist_url,
+)
 
 
 LIVE_CHECK_WORKERS = 20
@@ -35,6 +42,7 @@ class CheckerApp(tk.Tk):
         self.geometry("900x620")
         self.minsize(700, 480)
         self.results: Queue[CheckResult | None] = Queue()
+        self.pending_results: Queue[tuple[XtreamAccount, CheckResult] | None] = Queue()
         self.total = 0
         self.completed = 0
         self.saved = 0
@@ -54,7 +62,7 @@ class CheckerApp(tk.Tk):
         ).pack(anchor="w")
         ttk.Label(
             container,
-            text="Pega una URL HTTP o HTTPS por línea y pulsa Comprobar.",
+            text="Pega URLs Xtream: primero se guardan y después se validan por lotes.",
         ).pack(anchor="w", pady=(2, 10))
 
         self.input_text = tk.Text(container, height=10, wrap="none", font=("Consolas", 10))
@@ -67,8 +75,14 @@ class CheckerApp(tk.Tk):
         ttk.Spinbox(controls, from_=1, to=60, width=5, textvariable=self.timeout).pack(
             side="left", padx=(6, 14)
         )
-        self.check_button = ttk.Button(controls, text="Comprobar", command=self.start_check)
+        self.check_button = ttk.Button(
+            controls, text="Guardar pendientes", command=self.start_check
+        )
         self.check_button.pack(side="left")
+        self.validate_button = ttk.Button(
+            controls, text="Validar siguiente lote", command=self.start_pending_check
+        )
+        self.validate_button.pack(side="left", padx=(8, 0))
         ttk.Button(controls, text="Limpiar", command=self.clear).pack(side="left", padx=8)
         ttk.Button(
             controls,
@@ -610,6 +624,42 @@ class CheckerApp(tk.Tk):
         self.status_label.configure(text="Listo")
 
     def start_check(self) -> None:
+        parsed = parse_urls(self.input_text.get("1.0", "end"))
+        if not parsed.channels:
+            messagebox.showinfo("Sin URLs", "Pega al menos una URL HTTP o HTTPS valida.")
+            return
+        self.table.delete(*self.table.get_children())
+        self.total = len(parsed.channels)
+        self.completed = 0
+        self.saved = 0
+        warnings = list(parsed.warnings)
+        database = XtreamDatabase(self.database_path)
+        for channel in parsed.channels:
+            try:
+                account = parse_xtream_url(channel.url)
+            except ValueError as exc:
+                warnings.append(f"{channel.url}: {exc}")
+                self.table.insert("", "end", values=(channel.url, "Formato no válido", "—"), tags=("error",))
+                continue
+            _identifier, created = database.save_pending(account)
+            self.completed += 1
+            self.saved += int(created)
+            self.table.insert(
+                "", "end", values=(channel.url, "Pendiente" if created else "Duplicada", "—")
+            )
+        self.progress.configure(maximum=max(1, self.total), value=self.total)
+        self.status_label.configure(
+            text=f"Carga finalizada: {self.saved} nueva(s), {self.completed - self.saved} duplicada(s)."
+        )
+        self._log(
+            f"Carga sin conexión finalizada: {self.saved} cuenta(s) nueva(s) pendientes."
+        )
+        if warnings:
+            messagebox.showwarning("Líneas ignoradas", "\n".join(warnings))
+
+    def start_pending_check(self) -> None:
+        """Comprueba hasta cinco cuentas pendientes de cada servidor."""
+
         try:
             timeout = float(self.timeout.get())
             if timeout <= 0:
@@ -617,25 +667,67 @@ class CheckerApp(tk.Tk):
         except ValueError:
             messagebox.showerror("Dato incorrecto", "El tiempo máximo debe ser mayor que cero.")
             return
-
-        parsed = parse_urls(self.input_text.get("1.0", "end"))
-        if not parsed.channels:
-            messagebox.showinfo("Sin URLs", "Pega al menos una URL HTTP o HTTPS valida.")
+        accounts = XtreamDatabase(self.database_path).pending_batches(5)
+        if not accounts:
+            messagebox.showinfo("Sin pendientes", "No hay cuentas pendientes de validación.")
             return
-        if parsed.warnings:
-            messagebox.showwarning("Líneas ignoradas", "\n".join(parsed.warnings))
-
         self.table.delete(*self.table.get_children())
-        self.total = len(parsed.channels)
+        self.total = len(accounts)
         self.completed = 0
-        self.saved = 0
         self.progress.configure(maximum=self.total, value=0)
-        self.status_label.configure(text=f"Comprobando 0 de {self.total}...")
-        self._log(f"Iniciando comprobación de {self.total} URL(s), timeout {timeout:g} s.")
         self.check_button.state(["disabled"])
+        self.validate_button.state(["disabled"])
+        self.status_label.configure(text=f"Validando 0 de {self.total}...")
+        self._log(f"Validando un lote de {self.total} cuenta(s), máximo 5 por servidor.")
+        Thread(target=self._check_pending_in_background, args=(accounts, timeout), daemon=True).start()
+        self.after(100, self._read_pending_results)
 
-        Thread(target=self._check_in_background, args=(parsed.channels, timeout), daemon=True).start()
-        self.after(100, self._read_results)
+    def _check_pending_in_background(
+        self, accounts: tuple[XtreamAccount, ...], timeout: float
+    ) -> None:
+        checker = PlaylistChecker(timeout=timeout, workers=min(10, len(accounts)))
+        with ThreadPoolExecutor(max_workers=checker.workers) as executor:
+            futures = {
+                executor.submit(
+                    checker.check, Channel(account.username, xtream_playlist_url(account))
+                ): account
+                for account in accounts
+            }
+            for future in as_completed(futures):
+                self.pending_results.put((futures[future], future.result()))
+        self.pending_results.put(None)
+
+    def _read_pending_results(self) -> None:
+        finished = False
+        try:
+            while True:
+                payload = self.pending_results.get_nowait()
+                if payload is None:
+                    finished = True
+                    break
+                account, result = payload
+                validated = replace(
+                    account,
+                    is_valid=result.available,
+                    validated_at=datetime.now(timezone.utc),
+                )
+                XtreamDatabase(self.database_path).save(validated)
+                self.completed += 1
+                detail = "Válida" if result.available else result.error or "No disponible"
+                self.table.insert(
+                    "", "end", values=(result.channel.url, detail, f"{result.elapsed_ms} ms"),
+                    tags=("ok" if result.available else "error",),
+                )
+                self.progress.configure(value=self.completed)
+        except Empty:
+            pass
+        if finished:
+            self.check_button.state(["!disabled"])
+            self.validate_button.state(["!disabled"])
+            self.status_label.configure(text=f"Lote finalizado: {self.completed} cuenta(s).")
+            self._log(f"Validación por lote finalizada: {self.completed} cuenta(s).")
+        else:
+            self.after(100, self._read_pending_results)
 
     def _check_in_background(self, channels: tuple[Channel, ...], timeout: float) -> None:
         checker = PlaylistChecker(timeout=timeout, workers=min(10, len(channels)))
@@ -786,7 +878,7 @@ def _account_row(account: XtreamAccount) -> tuple[str, ...]:
     status = (
         "Obsoleta"
         if _account_is_obsolete(account)
-        else {True: "Válida", None: "Sin validar"}[account.is_valid]
+        else {True: "Válida", None: "Pendiente sin validar"}[account.is_valid]
     )
     return (
         account.server_name,

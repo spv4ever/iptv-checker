@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
 import sqlite3
+import uuid
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -26,6 +27,7 @@ class XtreamAccount:
     is_valid: bool | None = None
     validated_at: datetime | None = None
     valid_until: datetime | None = None
+    account_guid: str | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,12 +222,29 @@ class XtreamDatabase:
                     is_valid INTEGER,
                     validated_at TEXT,
                     valid_until TEXT,
+                    account_guid TEXT NOT NULL UNIQUE,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE (access_url, username)
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(xtream_accounts)")
+            }
+            if "account_guid" not in columns:
+                connection.execute("ALTER TABLE xtream_accounts ADD COLUMN account_guid TEXT")
+                rows = connection.execute(
+                    "SELECT id, access_url, username, password FROM xtream_accounts"
+                ).fetchall()
+                for row in rows:
+                    connection.execute(
+                        "UPDATE xtream_accounts SET account_guid=? WHERE id=?",
+                        (account_guid(row["access_url"], row["username"], row["password"]), row["id"]),
+                    )
+                connection.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_xtream_account_guid "
+                    "ON xtream_accounts(account_guid)"
+                )
 
     def save(self, account: XtreamAccount) -> int:
         """Crea o actualiza una cuenta y devuelve su identificador."""
@@ -233,14 +252,17 @@ class XtreamDatabase:
         is_valid = None if account.is_valid is None else int(account.is_valid)
         validated_at = _to_iso(account.validated_at)
         valid_until = _to_iso(account.valid_until)
+        guid = account.account_guid or account_guid(
+            account.access_url, account.username, account.password
+        )
         with self._connect() as connection:
             connection.execute(
                 """
                 INSERT INTO xtream_accounts
                     (server_name, access_url, username, password, is_valid,
-                     validated_at, valid_until)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(access_url, username) DO UPDATE SET
+                     validated_at, valid_until, account_guid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_guid) DO UPDATE SET
                     server_name=excluded.server_name,
                     password=excluded.password,
                     is_valid=excluded.is_valid,
@@ -256,13 +278,54 @@ class XtreamDatabase:
                     is_valid,
                     validated_at,
                     valid_until,
+                    guid,
                 ),
             )
             row = connection.execute(
-                "SELECT id FROM xtream_accounts WHERE access_url=? AND username=?",
-                (account.access_url, account.username),
+                "SELECT id FROM xtream_accounts WHERE account_guid=?",
+                (guid,),
             ).fetchone()
         return int(row["id"])
+
+    def save_pending(self, account: XtreamAccount) -> tuple[int, bool]:
+        """Guarda una cuenta nueva como pendiente sin reiniciar duplicados ya validados."""
+
+        guid = account.account_guid or account_guid(
+            account.access_url, account.username, account.password
+        )
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """INSERT OR IGNORE INTO xtream_accounts
+                   (server_name, access_url, username, password, is_valid,
+                    validated_at, valid_until, account_guid)
+                   VALUES (?, ?, ?, ?, NULL, NULL, NULL, ?)""",
+                (account.server_name, account.access_url, account.username, account.password, guid),
+            )
+            row = connection.execute(
+                "SELECT id FROM xtream_accounts WHERE account_guid=?", (guid,)
+            ).fetchone()
+        return int(row["id"]), cursor.rowcount == 1
+
+    def pending_batches(self, limit_per_server: int = 5) -> tuple[XtreamAccount, ...]:
+        """Devuelve las primeras cuentas pendientes de cada servidor."""
+
+        if limit_per_server <= 0:
+            raise ValueError("limit_per_server debe ser mayor que cero")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT server_name, access_url, username, password, is_valid,
+                          validated_at, valid_until, account_guid
+                   FROM (
+                       SELECT *, ROW_NUMBER() OVER (
+                           PARTITION BY access_url ORDER BY id
+                       ) AS server_position
+                       FROM xtream_accounts WHERE is_valid IS NULL
+                   )
+                   WHERE server_position <= ?
+                   ORDER BY access_url, server_position""",
+                (limit_per_server,),
+            ).fetchall()
+        return tuple(_account_from_row(row) for row in rows)
 
     def all(self) -> tuple[XtreamAccount, ...]:
         """Devuelve las cuentas ordenadas por nombre de servidor."""
@@ -270,19 +333,11 @@ class XtreamDatabase:
         with self._connect() as connection:
             rows = connection.execute(
                 """SELECT server_name, access_url, username, password, is_valid,
-                          validated_at, valid_until
+                          validated_at, valid_until, account_guid
                    FROM xtream_accounts ORDER BY server_name, username"""
             ).fetchall()
         return tuple(
-            XtreamAccount(
-                server_name=row["server_name"],
-                access_url=row["access_url"],
-                username=row["username"],
-                password=row["password"],
-                is_valid=None if row["is_valid"] is None else bool(row["is_valid"]),
-                validated_at=_from_iso(row["validated_at"]),
-                valid_until=_from_iso(row["valid_until"]),
-            )
+            _account_from_row(row)
             for row in rows
         )
 
@@ -320,3 +375,32 @@ def _to_iso(value: datetime | None) -> str | None:
 
 def _from_iso(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
+
+
+def account_guid(access_url: str, username: str, password: str) -> str:
+    """Crea una identidad estable para deduplicar exactamente una cuenta copiada."""
+
+    identity = "\0".join((access_url.casefold().rstrip("/"), username, password))
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, identity))
+
+
+def xtream_playlist_url(account: XtreamAccount) -> str:
+    """Reconstruye una URL comprobable sin almacenarla con credenciales duplicadas."""
+
+    query = urlencode(
+        {"username": account.username, "password": account.password, "type": "m3u_plus"}
+    )
+    return f"{account.access_url}/get.php?{query}"
+
+
+def _account_from_row(row: sqlite3.Row) -> XtreamAccount:
+    return XtreamAccount(
+        server_name=row["server_name"],
+        access_url=row["access_url"],
+        username=row["username"],
+        password=row["password"],
+        is_valid=None if row["is_valid"] is None else bool(row["is_valid"]),
+        validated_at=_from_iso(row["validated_at"]),
+        valid_until=_from_iso(row["valid_until"]),
+        account_guid=row["account_guid"],
+    )

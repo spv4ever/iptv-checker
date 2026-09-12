@@ -202,7 +202,7 @@ class SavedAccountsViewTest(unittest.TestCase):
     def test_formats_unknown_validation_status(self) -> None:
         account = XtreamAccount("Servidor", "https://example.com", "bob", "clave")
 
-        self.assertEqual(_account_row(account)[3], "Sin validar")
+        self.assertEqual(_account_row(account)[3], "Pendiente sin validar")
 
     def test_marks_expired_account_as_obsolete(self) -> None:
         account = XtreamAccount(

@@ -8,8 +8,10 @@ from iptv_checker.xtream import (
     XtreamAccount,
     XtreamClient,
     XtreamDatabase,
+    account_guid,
     expiration_from_api,
     parse_xtream_url,
+    xtream_playlist_url,
 )
 
 
@@ -53,9 +55,72 @@ class XtreamUrlTest(unittest.TestCase):
         )
         self.assertIsNone(expiration_from_api(None))
 
+    def test_builds_stable_identity_and_reconstructs_check_url(self) -> None:
+        account = parse_xtream_url(
+            "https://TV.example/get.php?password=secret+word&username=alice"
+        )
+
+        self.assertEqual(
+            account_guid(account.access_url, account.username, account.password),
+            account_guid("https://tv.example/", "alice", "secret word"),
+        )
+        self.assertEqual(
+            xtream_playlist_url(account),
+            "https://tv.example/get.php?username=alice&password=secret+word&type=m3u_plus",
+        )
+
 
 class XtreamDatabaseTest(unittest.TestCase):
-    def test_saves_and_updates_segmented_account(self) -> None:
+    def test_pending_import_is_idempotent_and_does_not_reset_validation(self) -> None:
+        with TemporaryDirectory() as directory:
+            database = XtreamDatabase(Path(directory) / "xtream.db")
+            account = XtreamAccount("Servidor", "https://example.com", "user", "pass")
+
+            identifier, created = database.save_pending(account)
+            same_identifier, duplicated = database.save_pending(account)
+            database.save(
+                XtreamAccount("Servidor", "https://example.com", "user", "pass", True)
+            )
+            _identifier, duplicated_after_validation = database.save_pending(account)
+
+            self.assertTrue(created)
+            self.assertFalse(duplicated)
+            self.assertFalse(duplicated_after_validation)
+            self.assertEqual(identifier, same_identifier)
+            self.assertTrue(database.all()[0].is_valid)
+
+    def test_selects_at_most_five_pending_accounts_per_server(self) -> None:
+        with TemporaryDirectory() as directory:
+            database = XtreamDatabase(Path(directory) / "xtream.db")
+            for server in ("https://one", "https://two"):
+                for index in range(7):
+                    database.save_pending(
+                        XtreamAccount(server, server, f"user-{index}", "pass")
+                    )
+            database.save(XtreamAccount("Uno", "https://one", "user-0", "pass", True))
+
+            pending = database.pending_batches()
+
+            self.assertEqual(len(pending), 10)
+            self.assertEqual(
+                {server: sum(account.access_url == server for account in pending)
+                 for server in ("https://one", "https://two")},
+                {"https://one": 5, "https://two": 5},
+            )
+
+    def test_keeps_changed_credentials_as_a_distinct_account(self) -> None:
+        with TemporaryDirectory() as directory:
+            database = XtreamDatabase(Path(directory) / "xtream.db")
+
+            database.save_pending(XtreamAccount("Servidor", "https://one", "user", "old"))
+            _identifier, created = database.save_pending(
+                XtreamAccount("Servidor", "https://one", "user", "new")
+            )
+
+            self.assertTrue(created)
+            self.assertEqual(len(database.all()), 2)
+
+    def test_saves_and_updates_the_same_segmented_account(self) -> None:
         with TemporaryDirectory() as directory:
             database = XtreamDatabase(Path(directory) / "data" / "xtream.db")
             first = XtreamAccount("Servidor", "https://example.com", "user", "old")
@@ -64,7 +129,7 @@ class XtreamDatabaseTest(unittest.TestCase):
                 "Servidor principal",
                 "https://example.com",
                 "user",
-                "new",
+                "old",
                 True,
                 datetime(2026, 9, 12, tzinfo=timezone.utc),
                 valid_until,
