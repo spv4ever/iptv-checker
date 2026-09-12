@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from queue import Empty, Queue
 import sqlite3
@@ -13,7 +14,7 @@ from tkinter import messagebox, ttk
 
 from .checker import CheckResult, PlaylistChecker
 from .playlist import Channel, parse_urls
-from .xtream import XtreamAccount, XtreamDatabase
+from .xtream import XtreamAccount, XtreamDatabase, parse_xtream_url
 
 
 class CheckerApp(tk.Tk):
@@ -27,6 +28,7 @@ class CheckerApp(tk.Tk):
         self.results: Queue[CheckResult | None] = Queue()
         self.total = 0
         self.completed = 0
+        self.saved = 0
         self.database_path = Path(database_path)
         self.saved_window: tk.Toplevel | None = None
         self._build_ui()
@@ -171,6 +173,7 @@ class CheckerApp(tk.Tk):
         self.table.delete(*self.table.get_children())
         self.total = len(parsed.channels)
         self.completed = 0
+        self.saved = 0
         self.progress.configure(maximum=self.total, value=0)
         self.status_label.configure(text=f"Comprobando 0 de {self.total}...")
         self.check_button.state(["disabled"])
@@ -200,12 +203,26 @@ class CheckerApp(tk.Tk):
 
         if finished:
             self.check_button.state(["!disabled"])
-            self.status_label.configure(text=f"Finalizado: {self.completed} URLs comprobadas.")
+            self.status_label.configure(
+                text=(
+                    f"Finalizado: {self.completed} URLs comprobadas, "
+                    f"{self.saved} cuenta(s) guardada(s)."
+                )
+            )
         else:
             self.after(100, self._read_results)
 
     def _add_result(self, result: CheckResult) -> None:
         self.completed += 1
+        try:
+            if _save_available_account(result, self.database_path):
+                self.saved += 1
+        except (OSError, sqlite3.Error) as exc:
+            messagebox.showerror(
+                "No se pudo guardar",
+                f"La URL es válida, pero no se pudo guardar en la base de datos:\n{exc}",
+                parent=self,
+            )
         detail = f"Disponible ({result.status})" if result.available else result.error or "No disponible"
         self.table.insert(
             "",
@@ -215,6 +232,26 @@ class CheckerApp(tk.Tk):
         )
         self.progress.configure(value=self.completed)
         self.status_label.configure(text=f"Comprobando {self.completed} de {self.total}...")
+
+
+def _save_available_account(result: CheckResult, database_path: str | Path) -> bool:
+    """Guarda una URL Xtream válida después de comprobar que está disponible."""
+
+    if not result.available:
+        return False
+    try:
+        account = parse_xtream_url(result.channel.url)
+    except ValueError:
+        # El comprobador también acepta URLs HTTP genéricas, que no contienen
+        # las credenciales necesarias para crear una cuenta Xtream.
+        return False
+    validated_account = replace(
+        account,
+        is_valid=True,
+        validated_at=datetime.now(timezone.utc),
+    )
+    XtreamDatabase(database_path).save(validated_account)
+    return True
 
 
 def _account_row(account: XtreamAccount) -> tuple[str, ...]:

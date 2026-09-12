@@ -45,7 +45,10 @@ POSIX y no debe compartirse ni añadirse al control de versiones.
 
 Desde la aplicación gráfica también puedes pulsar **Base de datos guardados**
 para consultar las cuentas almacenadas, su estado y sus fechas de validación y
-caducidad. La contraseña no se muestra en esta vista.
+caducidad. Cada URL Xtream que termina la comprobación con resultado disponible
+se guarda automáticamente como válida, junto con la fecha de validación. Las
+URLs genéricas que no contienen usuario y contraseña sólo se comprueban. La
+contraseña no se muestra en esta vista.
 
 ## Pruebas
 
