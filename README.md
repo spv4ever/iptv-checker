@@ -20,6 +20,29 @@ respuesta.
 Requiere Python 3.10 o posterior. La interfaz utiliza Tkinter, incluido en la
 instalación normal de Python para Windows.
 
+## Base de datos Xtream Codes
+
+El paquete incluye una base SQLite para guardar los datos de acceso ya
+segmentados: nombre del servidor, URL base normalizada, usuario, contraseña,
+estado de validez, fecha de la última validación y fecha de caducidad. Las
+altas son idempotentes por URL y usuario.
+
+```python
+from iptv_checker import XtreamDatabase, parse_xtream_url
+
+cuenta = parse_xtream_url(
+    "http://tv.example:8080/get.php?username=usuario&password=clave&type=m3u_plus",
+    server_name="Servidor de casa",
+)
+XtreamDatabase("xtream.db").save(cuenta)
+```
+
+También se admiten enlaces directos con el formato
+`/live/usuario/contraseña/canal.ts`. La URL normalizada nunca contiene las
+credenciales. La contraseña sí se conserva en SQLite porque es necesaria para
+configurar Xtream Codes; el archivo se crea con permisos `0600` en sistemas
+POSIX y no debe compartirse ni añadirse al control de versiones.
+
 ## Pruebas
 
 ```bash
