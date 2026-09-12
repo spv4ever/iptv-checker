@@ -71,7 +71,9 @@ pausar/continuar, parar, ajustar el volumen y cerrar. La URL directa generada po
 Xtream ya contiene el usuario y la contraseña necesarios. Añade `mpv` o `ffplay`
 al `PATH`; en algunos entornos
 Wayland, la integración de ffplay depende de la compatibilidad XWayland/SDL del
-sistema, mientras que mpv es la opción recomendada.
+sistema, mientras que mpv es la opción recomendada. En Windows, si SDL no aplica
+el contenedor indicado, la aplicación vuelve a alojar automáticamente la ventana
+nativa de ffplay dentro del área de vídeo y la ajusta al redimensionarla.
 
 ## Pruebas
 
