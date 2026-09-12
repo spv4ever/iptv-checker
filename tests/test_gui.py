@@ -2,12 +2,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from iptv_checker.checker import CheckResult
 from iptv_checker.gui import (
     _account_row,
+    _apply_live_check,
     _check_live_channels,
+    _live_worker_count,
     _open_stream,
     _player_command,
     _save_available_account,
@@ -17,6 +19,30 @@ from iptv_checker.xtream import XtreamAccount, XtreamChannel, XtreamDatabase, Xt
 
 
 class SavedAccountsViewTest(unittest.TestCase):
+    def test_removes_unavailable_channels_from_the_live_table(self) -> None:
+        table = Mock()
+        result = CheckResult(Channel("Caído", "http://tv.example/1"), False, 404, 5)
+
+        _apply_live_check(table, "row-1", result)
+
+        table.delete.assert_called_once_with("row-1")
+        table.set.assert_not_called()
+
+    def test_keeps_and_marks_available_channels_in_the_live_table(self) -> None:
+        table = Mock()
+        result = CheckResult(Channel("Activo", "http://tv.example/2"), True, 200, 5)
+
+        _apply_live_check(table, "row-2", result)
+
+        table.set.assert_called_once_with("row-2", "availability", "Accesible")
+        table.item.assert_called_once_with("row-2", tags=("ok",))
+        table.delete.assert_not_called()
+
+    def test_scales_live_checks_up_to_the_worker_limit(self) -> None:
+        self.assertEqual(_live_worker_count(0), 1)
+        self.assertEqual(_live_worker_count(7), 7)
+        self.assertEqual(_live_worker_count(500), 20)
+
     @patch("iptv_checker.gui.PlaylistChecker.check_all")
     def test_checks_every_live_stream_before_it_can_be_opened(self, check_all_mock) -> None:
         channels = (

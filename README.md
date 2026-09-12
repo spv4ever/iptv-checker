@@ -53,10 +53,12 @@ contraseña no se muestra en esta vista.
 Haz doble clic en una cuenta de la ventana de la base de datos para consultar
 su estado actual y obtener desde `player_api.php` la lista de canales live. La
 aplicación **descarga y muestra primero la lista completa** y después comprueba
-cada URL de stream en segundo plano. La columna **Acceso** cambia de «Pendiente»
-a «Accesible» o «No accesible» a medida que llegan los resultados, sin congelar
-la ventana. El panel **Actividad** y el estado de la ventana de canales indican
-qué fase se está ejecutando.
+cada URL de stream en segundo plano. Durante la comprobación, la tabla conserva
+únicamente los canales «Pendiente» y «Accesible»: los que resultan no accesibles
+desaparecen automáticamente. Los resultados se procesan por lotes y las pruebas
+de red se ejecutan en paralelo para mantener ágil la interfaz incluso con listas
+grandes. El panel **Actividad** y el estado de la ventana de canales indican qué
+fase se está ejecutando.
 
 Haz doble clic en cualquier canal para reproducir su URL directa generada por
 Xtream, que ya incluye el usuario y la contraseña necesarios. El programa usa
