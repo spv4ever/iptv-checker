@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 ATTRIBUTE_RE = re.compile(r'([\w-]+)="([^"]*)"')
 SUPPORTED_SCHEMES = {"http", "https"}
+MARKDOWN_LINK_RE = re.compile(r"^\[([^\]]+)]\(([^)]+)\)$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,28 @@ class ParseResult:
     warnings: tuple[str, ...]
 
 
+def normalize_url(value: str) -> str:
+    """Elimina envoltorios añadidos al copiar una URL desde un mensaje."""
+
+    url = value.strip()
+    while len(url) >= 2 and (url[0], url[-1]) in {
+        ("«", "»"),
+        ('"', '"'),
+        ("'", "'"),
+        ("<", ">"),
+    }:
+        url = url[1:-1].strip()
+
+    markdown = MARKDOWN_LINK_RE.fullmatch(url)
+    if markdown:
+        label, target = (part.strip() for part in markdown.groups())
+        # Algunos clientes convierten automáticamente el texto copiado en un
+        # enlace Markdown. Preferimos la URL visible cuando también es válida.
+        url = label if urlparse(label).scheme.lower() in SUPPORTED_SCHEMES else target
+        url = url.strip("«»").strip()
+    return url
+
+
 def _metadata(line: str) -> tuple[str, dict[str, str]]:
     header, separator, title = line.partition(",")
     attributes = dict(ATTRIBUTE_RE.findall(header))
@@ -42,7 +65,7 @@ def parse_m3u(content: str) -> ParseResult:
     pending: tuple[str, dict[str, str]] | None = None
 
     for number, raw_line in enumerate(content.splitlines(), start=1):
-        line = raw_line.strip()
+        line = normalize_url(raw_line)
         if not line or line == "#EXTM3U":
             continue
         if line.startswith("#EXTINF:"):
@@ -70,7 +93,7 @@ def parse_urls(content: str) -> ParseResult:
     channels: list[Channel] = []
     warnings: list[str] = []
     for number, raw_line in enumerate(content.splitlines(), start=1):
-        url = raw_line.strip()
+        url = normalize_url(raw_line)
         if not url:
             continue
         if urlparse(url).scheme.lower() not in SUPPORTED_SCHEMES:
