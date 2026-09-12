@@ -111,6 +111,16 @@ class XtreamDatabaseTest(unittest.TestCase):
             self.assertEqual(database.delete_obsolete(now=now), 2)
             self.assertEqual([account.server_name for account in database.all()], ["Activa"])
 
+    def test_deletes_all_accounts(self) -> None:
+        with TemporaryDirectory() as directory:
+            database = XtreamDatabase(Path(directory) / "xtream.db")
+            database.save(XtreamAccount("Uno", "https://one", "u", "p"))
+            database.save(XtreamAccount("Dos", "https://two", "u", "p"))
+
+            self.assertEqual(database.delete_all(), 2)
+            self.assertEqual(database.all(), ())
+            self.assertEqual(database.delete_all(), 0)
+
 
 class XtreamClientTest(unittest.TestCase):
     @patch("iptv_checker.xtream.urlopen")

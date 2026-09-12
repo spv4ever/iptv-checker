@@ -247,10 +247,33 @@ class CheckerApp(tk.Tk):
                 parent=window,
             )
 
+        def delete_all() -> None:
+            if not messagebox.askyesno(
+                "Borrar todas las cuentas",
+                "¿Quieres borrar todas las cuentas guardadas? Esta acción no se puede deshacer.",
+                parent=window,
+            ):
+                return
+            try:
+                deleted = XtreamDatabase(self.database_path).delete_all()
+            except (OSError, sqlite3.Error) as exc:
+                messagebox.showerror("No se pudieron borrar", str(exc), parent=window)
+                return
+            refresh()
+            self._log(f"Se eliminaron todas las cuentas guardadas ({deleted}).")
+            messagebox.showinfo(
+                "Cuentas eliminadas",
+                f"Se eliminaron {deleted} cuenta(s) guardada(s).",
+                parent=window,
+            )
+
         ttk.Button(footer, text="Actualizar", command=refresh).pack(side="right")
         ttk.Button(
             footer, text="Limpiar cuentas obsoletas", command=delete_obsolete
         ).pack(side="right", padx=(0, 8))
+        ttk.Button(footer, text="Borrar todas", command=delete_all).pack(
+            side="right", padx=(0, 8)
+        )
         refresh()
 
     def _open_channel_details(
