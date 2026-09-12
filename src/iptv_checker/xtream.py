@@ -286,24 +286,27 @@ class XtreamDatabase:
             for row in rows
         )
 
-    def delete_obsolete(self, *, now: datetime | None = None) -> int:
-        """Borra cuentas no válidas o cuya fecha de caducidad ya pasó."""
+    def delete_obsolete(self, server_name: str, *, now: datetime | None = None) -> int:
+        """Borra las cuentas obsoletas que pertenecen al servidor indicado."""
 
         cutoff = _to_iso(now or datetime.now(timezone.utc))
         with self._connect() as connection:
             cursor = connection.execute(
                 """DELETE FROM xtream_accounts
-                   WHERE is_valid = 0
-                      OR (valid_until IS NOT NULL AND valid_until <= ?)""",
-                (cutoff,),
+                   WHERE server_name = ?
+                     AND (is_valid = 0
+                          OR (valid_until IS NOT NULL AND valid_until <= ?))""",
+                (server_name, cutoff),
             )
         return cursor.rowcount
 
-    def delete_all(self) -> int:
-        """Borra todas las cuentas almacenadas y devuelve cuántas eliminó."""
+    def delete_server(self, server_name: str) -> int:
+        """Borra las cuentas del servidor indicado y devuelve cuántas eliminó."""
 
         with self._connect() as connection:
-            cursor = connection.execute("DELETE FROM xtream_accounts")
+            cursor = connection.execute(
+                "DELETE FROM xtream_accounts WHERE server_name = ?", (server_name,)
+            )
         return cursor.rowcount
 
 

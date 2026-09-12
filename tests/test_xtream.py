@@ -108,18 +108,33 @@ class XtreamDatabaseTest(unittest.TestCase):
                 )
             )
 
-            self.assertEqual(database.delete_obsolete(now=now), 2)
+            self.assertEqual(database.delete_obsolete("Fallida", now=now), 1)
+            self.assertEqual(database.delete_obsolete("Caducada", now=now), 1)
             self.assertEqual([account.server_name for account in database.all()], ["Activa"])
 
-    def test_deletes_all_accounts(self) -> None:
+    def test_deletes_only_accounts_from_selected_server(self) -> None:
         with TemporaryDirectory() as directory:
             database = XtreamDatabase(Path(directory) / "xtream.db")
             database.save(XtreamAccount("Uno", "https://one", "u", "p"))
+            database.save(XtreamAccount("Uno", "https://one-2", "u2", "p"))
             database.save(XtreamAccount("Dos", "https://two", "u", "p"))
 
-            self.assertEqual(database.delete_all(), 2)
-            self.assertEqual(database.all(), ())
-            self.assertEqual(database.delete_all(), 0)
+            self.assertEqual(database.delete_server("Uno"), 2)
+            self.assertEqual(
+                [account.server_name for account in database.all()], ["Dos"]
+            )
+            self.assertEqual(database.delete_server("Uno"), 0)
+
+    def test_obsolete_cleanup_does_not_touch_other_servers(self) -> None:
+        with TemporaryDirectory() as directory:
+            database = XtreamDatabase(Path(directory) / "xtream.db")
+            database.save(XtreamAccount("Uno", "https://one", "u", "p", False))
+            database.save(XtreamAccount("Dos", "https://two", "u", "p", False))
+
+            self.assertEqual(database.delete_obsolete("Uno"), 1)
+            self.assertEqual(
+                [account.server_name for account in database.all()], ["Dos"]
+            )
 
 
 class XtreamClientTest(unittest.TestCase):
