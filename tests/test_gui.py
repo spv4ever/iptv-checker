@@ -28,6 +28,7 @@ class SavedAccountsViewTest(unittest.TestCase):
             ("Servidor principal", "https://example.com", "alice", "Válida"),
         )
         self.assertNotIn("secreto", row)
+        self.assertEqual(row[4], "—")
         self.assertEqual(row[-1], "—")
 
     def test_formats_unknown_validation_status(self) -> None:
