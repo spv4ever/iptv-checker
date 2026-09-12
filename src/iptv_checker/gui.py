@@ -23,6 +23,7 @@ from .xtream import XtreamAccount, XtreamClient, XtreamDatabase, XtreamDetails, 
 
 LIVE_CHECK_WORKERS = 20
 LIVE_RESULTS_PER_POLL = 200
+ALL_SERVERS = "Todos los servidores"
 
 
 class CheckerApp(tk.Tk):
@@ -130,6 +131,19 @@ class CheckerApp(tk.Tk):
         )
         ttk.Label(container, text=f"Archivo: {self.database_path}").pack(anchor="w", pady=(2, 10))
 
+        filters = ttk.Frame(container)
+        filters.pack(fill="x", pady=(0, 10))
+        ttk.Label(filters, text="Servidor:").pack(side="left")
+        server_filter = tk.StringVar(value=ALL_SERVERS)
+        server_box = ttk.Combobox(
+            filters,
+            state="readonly",
+            textvariable=server_filter,
+            values=(ALL_SERVERS,),
+            width=30,
+        )
+        server_box.pack(side="left", padx=(6, 0))
+
         columns = ("server", "url", "username", "status", "live", "validated", "expires")
         table = ttk.Treeview(container, columns=columns, show="headings")
         headings = {
@@ -157,15 +171,12 @@ class CheckerApp(tk.Tk):
         count_label = ttk.Label(footer)
         count_label.pack(side="left")
         accounts_by_item: dict[str, XtreamAccount] = {}
+        all_accounts: tuple[XtreamAccount, ...] = ()
 
-        def refresh() -> None:
+        def apply_server_filter(_event: tk.Event[tk.Misc] | None = None) -> None:
             table.delete(*table.get_children())
             accounts_by_item.clear()
-            try:
-                accounts = XtreamDatabase(self.database_path).all()
-            except (OSError, sqlite3.Error) as exc:
-                messagebox.showerror("No se pudo abrir", str(exc), parent=window)
-                return
+            accounts = _filter_accounts_by_server(all_accounts, server_filter.get())
             for account in accounts:
                 item = table.insert(
                     "", "end", values=_account_row(account),
@@ -173,7 +184,24 @@ class CheckerApp(tk.Tk):
                 )
                 accounts_by_item[item] = account
                 table.set(item, "live", "Doble clic")
-            count_label.configure(text=f"{len(accounts)} cuenta(s) guardada(s)")
+            count_label.configure(
+                text=f"{len(accounts)} de {len(all_accounts)} cuenta(s) guardada(s)"
+            )
+
+        server_box.bind("<<ComboboxSelected>>", apply_server_filter)
+
+        def refresh() -> None:
+            nonlocal all_accounts
+            try:
+                all_accounts = XtreamDatabase(self.database_path).all()
+            except (OSError, sqlite3.Error) as exc:
+                messagebox.showerror("No se pudo abrir", str(exc), parent=window)
+                return
+            server_names = _server_filter_values(all_accounts)
+            server_box.configure(values=server_names)
+            if server_filter.get() not in server_names:
+                server_filter.set(ALL_SERVERS)
+            apply_server_filter()
 
         def open_channels(_event: tk.Event[tk.Misc]) -> None:
             item = table.focus()
@@ -727,6 +755,23 @@ def _account_row(account: XtreamAccount) -> tuple[str, ...]:
         _format_date(account.validated_at),
         _format_date(account.valid_until),
     )
+
+
+def _server_filter_values(accounts: tuple[XtreamAccount, ...]) -> tuple[str, ...]:
+    """Devuelve las opciones únicas y ordenadas del filtro de servidores."""
+
+    server_names = sorted({account.server_name for account in accounts}, key=str.casefold)
+    return (ALL_SERVERS, *server_names)
+
+
+def _filter_accounts_by_server(
+    accounts: tuple[XtreamAccount, ...], server_name: str
+) -> tuple[XtreamAccount, ...]:
+    """Selecciona las cuentas cuyo nombre de servidor coincide exactamente."""
+
+    if server_name == ALL_SERVERS:
+        return accounts
+    return tuple(account for account in accounts if account.server_name == server_name)
 
 
 def _account_is_obsolete(

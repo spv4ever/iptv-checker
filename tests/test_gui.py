@@ -6,17 +6,20 @@ from unittest.mock import Mock, patch
 
 from iptv_checker.checker import CheckResult
 from iptv_checker.gui import (
+    ALL_SERVERS,
     _account_is_obsolete,
     _account_row,
     _apply_live_check,
     _check_live_channels,
     _channel_matches_filters,
+    _filter_accounts_by_server,
     _filter_live_rows,
     _details_are_valid,
     _live_worker_count,
     _open_stream,
     _player_command,
     _save_available_account,
+    _server_filter_values,
     _set_live_filters_enabled,
 )
 from iptv_checker.playlist import Channel
@@ -24,6 +27,30 @@ from iptv_checker.xtream import XtreamAccount, XtreamChannel, XtreamDatabase, Xt
 
 
 class SavedAccountsViewTest(unittest.TestCase):
+    def test_lists_unique_server_names_for_saved_accounts_filter(self) -> None:
+        accounts = (
+            XtreamAccount("Zulu", "https://z.example", "one", "secret"),
+            XtreamAccount("alpha", "https://a.example", "two", "secret"),
+            XtreamAccount("Zulu", "https://z.example", "three", "secret"),
+        )
+
+        self.assertEqual(
+            _server_filter_values(accounts),
+            (ALL_SERVERS, "alpha", "Zulu"),
+        )
+
+    def test_filters_saved_accounts_by_exact_server_name(self) -> None:
+        accounts = (
+            XtreamAccount("Servidor A", "https://a.example", "one", "secret"),
+            XtreamAccount("Servidor B", "https://b.example", "two", "secret"),
+            XtreamAccount("Servidor A", "https://a.example", "three", "secret"),
+        )
+
+        filtered = _filter_accounts_by_server(accounts, "Servidor A")
+
+        self.assertEqual([account.username for account in filtered], ["one", "three"])
+        self.assertIs(_filter_accounts_by_server(accounts, ALL_SERVERS), accounts)
+
     def test_reenables_category_filter_after_live_check_finishes(self) -> None:
         channel_entry = Mock()
         category_box = Mock()
