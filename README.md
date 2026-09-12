@@ -43,6 +43,10 @@ credenciales. La contraseña sí se conserva en SQLite porque es necesaria para
 configurar Xtream Codes; el archivo se crea con permisos `0600` en sistemas
 POSIX y no debe compartirse ni añadirse al control de versiones.
 
+Desde la aplicación gráfica también puedes pulsar **Base de datos guardados**
+para consultar las cuentas almacenadas, su estado y sus fechas de validación y
+caducidad. La contraseña no se muestra en esta vista.
+
 ## Pruebas
 
 ```bash
