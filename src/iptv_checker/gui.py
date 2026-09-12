@@ -21,6 +21,10 @@ from .playlist import Channel, normalize_url, parse_urls
 from .xtream import XtreamAccount, XtreamClient, XtreamDatabase, XtreamDetails, parse_xtream_url
 
 
+LIVE_CHECK_WORKERS = 20
+LIVE_RESULTS_PER_POLL = 200
+
+
 class CheckerApp(tk.Tk):
     """Ventana principal de la aplicacion."""
 
@@ -226,9 +230,10 @@ class CheckerApp(tk.Tk):
         channel_log = ttk.Label(container, text="Preparando descarga…")
         channel_log.pack(anchor="w", pady=(3, 0))
         result_queue: Queue[tuple[str, object]] = Queue()
-        items_by_url: dict[str, str] = {}
+        items_by_url: dict[str, list[str]] = {}
         channel_count = 0
         available_count = 0
+        checked_count = 0
 
         def play_channel(event: tk.Event[tk.Misc]) -> None:
             item = table.identify_row(event.y)
@@ -265,7 +270,7 @@ class CheckerApp(tk.Tk):
                 # lista grande parezca bloqueada durante varios minutos.
                 result_queue.put(("details", details))
                 checker = PlaylistChecker(
-                    timeout=8, workers=min(10, max(1, len(details.channels)))
+                    timeout=8, workers=_live_worker_count(len(details.channels))
                 )
                 with ThreadPoolExecutor(max_workers=checker.workers) as executor:
                     futures = [
@@ -279,26 +284,28 @@ class CheckerApp(tk.Tk):
                 result_queue.put(("error", exc))
 
         def poll() -> None:
-            try:
-                kind, payload = result_queue.get_nowait()
-            except Empty:
-                if popup.winfo_exists():
-                    popup.after(100, poll)
-                return
-            if kind == "error":
-                failed(str(payload))
-                return
-            if kind == "details":
-                show_list(payload)  # type: ignore[arg-type]
-            elif kind == "check":
-                show_check(payload)  # type: ignore[arg-type]
-            elif kind == "done":
-                channel_log.configure(
-                    text=(f"Comprobación finalizada: {available_count}/"
-                          f"{channel_count} accesibles")
-                )
-                return
-            popup.after(25, poll)
+            processed = 0
+            while processed < LIVE_RESULTS_PER_POLL:
+                try:
+                    kind, payload = result_queue.get_nowait()
+                except Empty:
+                    break
+                processed += 1
+                if kind == "error":
+                    failed(str(payload))
+                    return
+                if kind == "details":
+                    show_list(payload)  # type: ignore[arg-type]
+                elif kind == "check":
+                    show_check(payload)  # type: ignore[arg-type]
+                elif kind == "done":
+                    channel_log.configure(
+                        text=(f"Comprobación finalizada: {available_count}/"
+                              f"{channel_count} accesibles")
+                    )
+                    return
+            if popup.winfo_exists():
+                popup.after(25 if processed else 100, poll)
 
         def failed(error: str) -> None:
             if popup.winfo_exists():
@@ -317,7 +324,7 @@ class CheckerApp(tk.Tk):
                     values=(channel.stream_id, channel.name, channel.category_name,
                             channel.container_extension, "Pendiente", channel.direct_url),
                 )
-                items_by_url[channel.direct_url] = item
+                items_by_url.setdefault(channel.direct_url, []).append(item)
             connections = _format_connections(details.active_connections, details.max_connections)
             summary.configure(
                 text=(f"Estado: {details.status} · Caducidad: {_format_date(details.valid_until)} "
@@ -329,19 +336,18 @@ class CheckerApp(tk.Tk):
                 account_table.set(account_item, "live", str(channel_count))
 
         def show_check(check: CheckResult) -> None:
-            nonlocal available_count
-            item = items_by_url.get(check.channel.url)
+            nonlocal available_count, checked_count
+            items = items_by_url.get(check.channel.url, [])
+            item = items.pop(0) if items else None
             if not item or not table.exists(item):
                 return
+            checked_count += 1
             if check.available:
                 available_count += 1
-            table.set(item, "availability", "Accesible" if check.available else "No accesible")
-            table.item(item, tags=("ok" if check.available else "error",))
-            checked = sum(
-                table.set(row, "availability") != "Pendiente"
-                for row in table.get_children()
+            _apply_live_check(table, item, check)
+            channel_log.configure(
+                text=f"Comprobando {checked_count}/{channel_count}: {check.channel.name}"
             )
-            channel_log.configure(text=f"Comprobando {checked}/{channel_count}: {check.channel.name}")
 
         Thread(target=load, daemon=True).start()
         popup.after(100, poll)
@@ -474,8 +480,24 @@ def _check_live_channels(details: XtreamDetails, *, timeout: float = 8) -> list[
     """Comprueba los streams anunciados por la API Xtream."""
 
     channels = tuple(Channel(channel.name, channel.direct_url) for channel in details.channels)
-    checker = PlaylistChecker(timeout=timeout, workers=min(10, max(1, len(channels))))
+    checker = PlaylistChecker(timeout=timeout, workers=_live_worker_count(len(channels)))
     return checker.check_all(channels)
+
+
+def _live_worker_count(channel_count: int) -> int:
+    """Dimensiona las comprobaciones de red sin crear hilos innecesarios."""
+
+    return min(LIVE_CHECK_WORKERS, max(1, channel_count))
+
+
+def _apply_live_check(table: ttk.Treeview, item: str, check: CheckResult) -> None:
+    """Conserva en la tabla sólo resultados pendientes o accesibles."""
+
+    if check.available:
+        table.set(item, "availability", "Accesible")
+        table.item(item, tags=("ok",))
+    else:
+        table.delete(item)
 
 
 def _account_row(account: XtreamAccount) -> tuple[str, ...]:
