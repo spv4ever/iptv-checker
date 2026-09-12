@@ -286,6 +286,19 @@ class XtreamDatabase:
             for row in rows
         )
 
+    def delete_obsolete(self, *, now: datetime | None = None) -> int:
+        """Borra cuentas no válidas o cuya fecha de caducidad ya pasó."""
+
+        cutoff = _to_iso(now or datetime.now(timezone.utc))
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """DELETE FROM xtream_accounts
+                   WHERE is_valid = 0
+                      OR (valid_until IS NOT NULL AND valid_until <= ?)""",
+                (cutoff,),
+            )
+        return cursor.rowcount
+
 
 def _to_iso(value: datetime | None) -> str | None:
     if value is None:

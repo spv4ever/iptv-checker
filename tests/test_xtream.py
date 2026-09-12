@@ -82,6 +82,35 @@ class XtreamDatabaseTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 database.save(account)
 
+    def test_deletes_failed_and_expired_accounts_only(self) -> None:
+        with TemporaryDirectory() as directory:
+            database = XtreamDatabase(Path(directory) / "xtream.db")
+            now = datetime(2026, 9, 12, tzinfo=timezone.utc)
+            database.save(
+                XtreamAccount(
+                    "Activa",
+                    "https://active",
+                    "u",
+                    "p",
+                    True,
+                    valid_until=datetime(2030, 1, 1, tzinfo=timezone.utc),
+                )
+            )
+            database.save(XtreamAccount("Fallida", "https://failed", "u", "p", False))
+            database.save(
+                XtreamAccount(
+                    "Caducada",
+                    "https://expired",
+                    "u",
+                    "p",
+                    True,
+                    valid_until=datetime(2020, 1, 1, tzinfo=timezone.utc),
+                )
+            )
+
+            self.assertEqual(database.delete_obsolete(now=now), 2)
+            self.assertEqual([account.server_name for account in database.all()], ["Activa"])
+
 
 class XtreamClientTest(unittest.TestCase):
     @patch("iptv_checker.xtream.urlopen")
