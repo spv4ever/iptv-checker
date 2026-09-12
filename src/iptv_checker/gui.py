@@ -17,7 +17,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from .checker import CheckResult, PlaylistChecker
-from .playlist import Channel, parse_urls
+from .playlist import Channel, normalize_url, parse_urls
 from .xtream import XtreamAccount, XtreamClient, XtreamDatabase, XtreamDetails, parse_xtream_url
 
 
@@ -415,7 +415,7 @@ def _open_stream(url: str) -> bool:
     # contraseña escapados. Se pasa como un único argumento (sin shell) para
     # que VLC pueda autenticarse sin abrir el navegador.
     subprocess.Popen(
-        [executable, url],
+        [executable, normalize_url(url)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )

@@ -1,9 +1,15 @@
 import unittest
 
-from iptv_checker.playlist import parse_m3u, parse_urls
+from iptv_checker.playlist import normalize_url, parse_m3u, parse_urls
 
 
 class ParseM3UTest(unittest.TestCase):
+    def test_removes_vlc_quotes_and_markdown_wrappers(self) -> None:
+        url = "http://tv.example/live/user/password/1064.ts"
+
+        self.assertEqual(normalize_url(f"«{url}»"), url)
+        self.assertEqual(normalize_url(f"[{url}»]({url}»)"), url)
+
     def test_reads_metadata_and_urls(self) -> None:
         parsed = parse_m3u(
             '#EXTM3U\n#EXTINF:-1 tvg-id="news" group-title="Info",Noticias\n'

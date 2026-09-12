@@ -12,6 +12,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
+from .playlist import normalize_url
+
 
 @dataclass(frozen=True, slots=True)
 class XtreamAccount:
@@ -141,7 +143,7 @@ def parse_xtream_url(url: str, *, server_name: str | None = None) -> XtreamAccou
     credenciales no quedan duplicadas dentro del campo de acceso.
     """
 
-    parsed = urlsplit(url.strip())
+    parsed = urlsplit(normalize_url(url))
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
         raise ValueError("la URL Xtream debe usar HTTP o HTTPS e incluir un servidor")
 

@@ -21,6 +21,17 @@ class SavedAccountsViewTest(unittest.TestCase):
         popen_mock.assert_called_once()
         self.assertEqual(popen_mock.call_args.args[0], ["/usr/bin/vlc", url])
 
+    @patch("iptv_checker.gui.subprocess.Popen")
+    @patch("iptv_checker.gui._vlc_executable", return_value="/usr/bin/vlc")
+    def test_removes_copied_message_wrappers_before_opening_vlc(
+        self, _vlc_mock, popen_mock
+    ) -> None:
+        url = "http://tv.example/live/user/password/1064.ts"
+
+        self.assertTrue(_open_stream(f"«{url}»"))
+
+        self.assertEqual(popen_mock.call_args.args[0], ["/usr/bin/vlc", url])
+
     @patch("iptv_checker.gui._vlc_executable", return_value=None)
     def test_reports_when_vlc_is_not_installed(self, _vlc_mock) -> None:
         self.assertFalse(_open_stream("https://tv.example/live/u/p/42.ts"))
