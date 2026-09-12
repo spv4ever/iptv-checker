@@ -13,6 +13,7 @@ from iptv_checker.gui import (
     _embedded_player_command,
     _filter_live_rows,
     _live_worker_count,
+    _maximize_player_window,
     _open_stream,
     _player_command,
     _save_available_account,
@@ -160,7 +161,29 @@ class SavedAccountsViewTest(unittest.TestCase):
         self.assertIn("--volume=72", command)
         self.assertIn("--no-fullscreen", command)
         self.assertIn("--no-ontop", command)
+        self.assertIn("--keepaspect=yes", command)
+        self.assertIn("--video-unscaled=no", command)
+        self.assertIn("--panscan=0", command)
+        self.assertIn("--video-zoom=0", command)
         self.assertNotIn("SDL_WINDOWID", environment)
+
+    @patch("iptv_checker.gui.sys.platform", "win32")
+    def test_maximizes_player_with_native_windows_state(self) -> None:
+        window = Mock()
+
+        _maximize_player_window(window)
+
+        window.state.assert_called_once_with("zoomed")
+        window.attributes.assert_not_called()
+
+    @patch("iptv_checker.gui.sys.platform", "linux")
+    def test_maximizes_player_with_window_manager_attribute(self) -> None:
+        window = Mock()
+
+        _maximize_player_window(window)
+
+        window.attributes.assert_called_once_with("-zoomed", True)
+        window.state.assert_not_called()
 
     @patch("iptv_checker.gui.shutil.which", return_value="/opt/ffplay")
     def test_builds_embedded_ffplay_environment(self, _which_mock) -> None:
