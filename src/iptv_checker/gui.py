@@ -7,11 +7,14 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from queue import Empty, Queue
+import os
+import shutil
 import sqlite3
+import subprocess
+import sys
 from threading import Thread
 import tkinter as tk
 from tkinter import messagebox, ttk
-import webbrowser
 
 from .checker import CheckResult, PlaylistChecker
 from .playlist import Channel, parse_urls
@@ -194,7 +197,7 @@ class CheckerApp(tk.Tk):
         table.pack(fill="both", expand=True)
         ttk.Label(
             container,
-            text="Haz doble clic en un canal para reproducirlo en el reproductor predeterminado.",
+            text="Haz doble clic en un canal para reproducirlo directamente en VLC.",
         ).pack(anchor="w", pady=(6, 0))
         result_queue: Queue[XtreamDetails | Exception] = Queue()
 
@@ -205,7 +208,7 @@ class CheckerApp(tk.Tk):
             direct_url = table.set(item, "url")
             try:
                 opened = _open_stream(direct_url)
-            except (OSError, webbrowser.Error) as exc:
+            except OSError as exc:
                 messagebox.showerror(
                     "No se pudo reproducir",
                     f"No se pudo abrir el canal:\n{exc}",
@@ -215,7 +218,7 @@ class CheckerApp(tk.Tk):
             if not opened:
                 messagebox.showerror(
                     "No se pudo reproducir",
-                    "No hay un reproductor o navegador disponible para abrir el canal.",
+                    "No se encontró VLC. Instálalo o añádelo al PATH para reproducir canales.",
                     parent=popup,
                 )
 
@@ -402,9 +405,40 @@ def _format_connections(active: int | None, maximum: int | None) -> str:
 
 
 def _open_stream(url: str) -> bool:
-    """Abre un stream en el reproductor o navegador predeterminado del sistema."""
+    """Reproduce directamente un stream autenticado mediante VLC."""
 
-    return webbrowser.open(url, new=2)
+    executable = _vlc_executable()
+    if executable is None:
+        return False
+
+    # La URL directa construida por XtreamClient ya incorpora el usuario y la
+    # contraseña escapados. Se pasa como un único argumento (sin shell) para
+    # que VLC pueda autenticarse sin abrir el navegador.
+    subprocess.Popen(
+        [executable, url],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return True
+
+
+def _vlc_executable() -> str | None:
+    """Localiza VLC en el PATH o en sus ubicaciones de instalación habituales."""
+
+    executable = shutil.which("vlc")
+    if executable:
+        return executable
+
+    candidates: list[Path] = []
+    if sys.platform == "win32":
+        for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+            base = os.environ.get(variable)
+            if base:
+                candidates.append(Path(base) / "VideoLAN" / "VLC" / "vlc.exe")
+    elif sys.platform == "darwin":
+        candidates.append(Path("/Applications/VLC.app/Contents/MacOS/VLC"))
+
+    return str(next((path for path in candidates if path.is_file()), "")) or None
 
 
 def main() -> None:
