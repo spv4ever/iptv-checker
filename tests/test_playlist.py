@@ -1,6 +1,6 @@
 import unittest
 
-from iptv_checker.playlist import parse_m3u
+from iptv_checker.playlist import parse_m3u, parse_urls
 
 
 class ParseM3UTest(unittest.TestCase):
@@ -20,6 +20,16 @@ class ParseM3UTest(unittest.TestCase):
 
         self.assertEqual(parsed.channels, ())
         self.assertEqual(len(parsed.warnings), 2)
+
+    def test_reads_plain_url_list_and_reports_invalid_lines(self) -> None:
+        parsed = parse_urls("https://example.com/live\nno-es-url\n\nhttp://example.org\n")
+
+        self.assertEqual(
+            [channel.url for channel in parsed.channels],
+            ["https://example.com/live", "http://example.org"],
+        )
+        self.assertEqual(len(parsed.warnings), 1)
+        self.assertIn("Línea 2", parsed.warnings[0])
 
 
 if __name__ == "__main__":

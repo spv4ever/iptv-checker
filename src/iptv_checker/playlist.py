@@ -62,3 +62,19 @@ def parse_m3u(content: str) -> ParseResult:
     if pending is not None:
         warnings.append("La última entrada #EXTINF no tiene URL")
     return ParseResult(tuple(channels), tuple(warnings))
+
+
+def parse_urls(content: str) -> ParseResult:
+    """Lee una URL HTTP(S) por línea e informa de las líneas no válidas."""
+
+    channels: list[Channel] = []
+    warnings: list[str] = []
+    for number, raw_line in enumerate(content.splitlines(), start=1):
+        url = raw_line.strip()
+        if not url:
+            continue
+        if urlparse(url).scheme.lower() not in SUPPORTED_SCHEMES:
+            warnings.append(f"Línea {number}: no es una URL HTTP o HTTPS válida")
+            continue
+        channels.append(Channel(name=url, url=url))
+    return ParseResult(tuple(channels), tuple(warnings))
