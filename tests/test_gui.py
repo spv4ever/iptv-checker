@@ -16,6 +16,7 @@ from iptv_checker.gui import (
     _open_stream,
     _player_command,
     _save_available_account,
+    _send_windows_key,
     _set_live_filters_enabled,
 )
 from iptv_checker.playlist import Channel
@@ -163,11 +164,26 @@ class SavedAccountsViewTest(unittest.TestCase):
 
     @patch("iptv_checker.gui.shutil.which", return_value="/opt/ffplay")
     def test_builds_embedded_ffplay_environment(self, _which_mock) -> None:
-        command, environment = _embedded_player_command("ffplay", 987, 65)
+        command, environment = _embedded_player_command("ffplay", 987, 65, 800, 450)
 
         self.assertEqual(command[-2:], ["-volume", "65"])
         self.assertIn("-noborder", command)
+        self.assertEqual(command[command.index("-x"):command.index("-x") + 4],
+                         ["-x", "800", "-y", "450"])
         self.assertEqual(environment["SDL_WINDOWID"], "987")
+
+    @patch("iptv_checker.gui.sys.platform", "win32")
+    def test_sends_ffplay_volume_keys_to_embedded_window(self) -> None:
+        with patch("ctypes.windll", create=True) as windll:
+            windll.user32.PostMessageW = Mock()
+
+            _send_windows_key(2468, "0", 2)
+
+        self.assertEqual(windll.user32.PostMessageW.call_count, 4)
+        self.assertEqual(
+            windll.user32.PostMessageW.call_args_list[0].args,
+            (2468, 0x0100, ord("0"), 0),
+        )
 
     @patch("iptv_checker.gui.shutil.which", return_value=None)
     def test_embedded_player_must_still_be_installed(self, _which_mock) -> None:
