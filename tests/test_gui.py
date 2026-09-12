@@ -11,13 +11,19 @@ from iptv_checker.xtream import XtreamAccount, XtreamDatabase
 
 
 class SavedAccountsViewTest(unittest.TestCase):
-    @patch("iptv_checker.gui.webbrowser.open", return_value=True)
-    def test_opens_channel_in_default_player(self, open_mock) -> None:
+    @patch("iptv_checker.gui.subprocess.Popen")
+    @patch("iptv_checker.gui._vlc_executable", return_value="/usr/bin/vlc")
+    def test_opens_authenticated_channel_in_vlc(self, _vlc_mock, popen_mock) -> None:
         url = "https://tv.example/live/alice/secret/42.ts"
 
         self.assertTrue(_open_stream(url))
 
-        open_mock.assert_called_once_with(url, new=2)
+        popen_mock.assert_called_once()
+        self.assertEqual(popen_mock.call_args.args[0], ["/usr/bin/vlc", url])
+
+    @patch("iptv_checker.gui._vlc_executable", return_value=None)
+    def test_reports_when_vlc_is_not_installed(self, _vlc_mock) -> None:
+        self.assertFalse(_open_stream("https://tv.example/live/u/p/42.ts"))
 
     def test_formats_saved_account_without_exposing_password(self) -> None:
         account = XtreamAccount(

@@ -55,8 +55,11 @@ su estado actual y obtener desde `player_api.php` la lista de canales live. La
 columna **Canales live** se actualiza con el total recibido y el nuevo popup
 muestra el ID, nombre, categoría, formato y URL directa de cada canal. La
 consulta se ejecuta en segundo plano para no bloquear la interfaz. Haz doble
-clic en cualquiera de esos canales para abrir su URL en el reproductor o
-navegador predeterminado del sistema.
+clic en cualquiera de esos canales para reproducirlo directamente en VLC. La
+aplicación entrega a VLC la URL directa generada por Xtream, que ya incluye el
+usuario y la contraseña necesarios, sin abrir el navegador. Para usar esta
+función debes tener VLC instalado; se detecta desde `PATH` y también en las
+ubicaciones habituales de Windows y macOS.
 
 ## Pruebas
 
