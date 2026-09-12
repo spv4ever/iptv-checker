@@ -7,10 +7,12 @@ from unittest.mock import Mock, patch
 from iptv_checker.checker import CheckResult
 from iptv_checker.gui import (
     ALL_SERVERS,
+    _account_detail_fields,
     _account_is_obsolete,
     _account_row,
     _apply_live_check,
     _check_live_channels,
+    _copy_to_clipboard,
     _channel_matches_filters,
     _filter_accounts_by_server,
     _filter_live_rows,
@@ -27,6 +29,40 @@ from iptv_checker.xtream import XtreamAccount, XtreamChannel, XtreamDatabase, Xt
 
 
 class SavedAccountsViewTest(unittest.TestCase):
+    def test_prepares_complete_copyable_account_details(self) -> None:
+        account = XtreamAccount(
+            "Servidor principal",
+            "https://tv.example:8080",
+            "alice@example.com",
+            "secreto con espacios",
+            True,
+            datetime(2026, 9, 12, 14, 30, tzinfo=timezone.utc),
+            datetime(2027, 1, 1, tzinfo=timezone.utc),
+            "guid-123",
+        )
+
+        details = dict(_account_detail_fields(account))
+
+        self.assertEqual(details["URL del portal"], "https://tv.example:8080")
+        self.assertEqual(details["Usuario"], "alice@example.com")
+        self.assertEqual(details["Contraseña"], "secreto con espacios")
+        self.assertEqual(
+            details["URL de lista M3U"],
+            "https://tv.example:8080/get.php?username=alice%40example.com&"
+            "password=secreto+con+espacios&type=m3u_plus",
+        )
+        self.assertEqual(details["Estado"], "Válida")
+        self.assertEqual(details["GUID"], "guid-123")
+
+    def test_copies_an_exact_field_to_the_system_clipboard(self) -> None:
+        widget = Mock()
+
+        _copy_to_clipboard(widget, "contraseña con espacios")
+
+        widget.clipboard_clear.assert_called_once_with()
+        widget.clipboard_append.assert_called_once_with("contraseña con espacios")
+        widget.update_idletasks.assert_called_once_with()
+
     def test_lists_unique_server_names_for_saved_accounts_filter(self) -> None:
         accounts = (
             XtreamAccount("Zulu", "https://z.example", "one", "secret"),

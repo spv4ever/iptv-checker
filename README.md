@@ -67,6 +67,11 @@ interfaz incluso con listas grandes.
 Al consultar los canales también se actualizan en SQLite el estado, la fecha de
 validación y la caducidad devuelta por la cuenta Xtream. El panel **Actividad** y
 el estado de la ventana de canales indican qué fase se está ejecutando.
+Al seleccionar una cuenta, el botón **Ver detalles** abre todos sus datos,
+incluidos la contraseña y el enlace M3U completo. Cada campo se puede copiar por
+separado para pegarlo en un reproductor o software de streaming; **Copiar todos**
+los reúne en el portapapeles en un solo paso. Las credenciales sólo se revelan
+en esta ventana de detalle y no en la tabla general.
 Si la fecha ya ha vencido o la API no responde al abrir la cuenta, ésta queda
 marcada en rojo como **Obsoleta**. El botón **Limpiar cuentas obsoletas** permite
 borrar de SQLite, previa confirmación, las cuentas caducadas o fallidas del
