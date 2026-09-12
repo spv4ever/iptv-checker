@@ -177,7 +177,8 @@ class CheckerApp(tk.Tk):
         table.pack(fill="both", expand=True)
         ttk.Label(
             container,
-            text="Haz doble clic en una cuenta para consultar sus canales en directo.",
+            text=("Selecciona una cuenta y pulsa Ver detalles para copiar sus credenciales. "
+                  "Haz doble clic para consultar sus canales en directo."),
         ).pack(anchor="w", pady=(6, 0))
 
         footer = ttk.Frame(container)
@@ -190,6 +191,7 @@ class CheckerApp(tk.Tk):
         def apply_server_filter(_event: tk.Event[tk.Misc] | None = None) -> None:
             table.delete(*table.get_children())
             accounts_by_item.clear()
+            details_button.state(["disabled"])
             accounts = _filter_accounts_by_server(all_accounts, server_filter.get())
             for account in accounts:
                 item = table.insert(
@@ -240,6 +242,31 @@ class CheckerApp(tk.Tk):
             self._open_channel_details(account, table, item)
 
         table.bind("<Double-1>", open_channels)
+
+        def open_account_details() -> None:
+            item = table.focus()
+            account = accounts_by_item.get(item)
+            if account is None:
+                messagebox.showinfo(
+                    "Selecciona una cuenta",
+                    "Selecciona la cuenta Xtream cuyos datos quieres consultar.",
+                    parent=window,
+                )
+                return
+            self._open_account_details(account)
+
+        details_button = ttk.Button(
+            footer, text="Ver detalles", command=open_account_details, state="disabled"
+        )
+        details_button.pack(side="left", padx=(12, 0))
+
+        def update_details_button(_event: tk.Event[tk.Misc] | None = None) -> None:
+            if table.focus() in accounts_by_item:
+                details_button.state(["!disabled"])
+            else:
+                details_button.state(["disabled"])
+
+        table.bind("<<TreeviewSelect>>", update_details_button)
 
         def delete_obsolete() -> None:
             selected_server = server_filter.get()
@@ -308,6 +335,50 @@ class CheckerApp(tk.Tk):
             side="right", padx=(0, 8)
         )
         refresh()
+
+    def _open_account_details(self, account: XtreamAccount) -> None:
+        """Muestra las credenciales completas y permite copiarlas por separado."""
+
+        popup = tk.Toplevel(self.saved_window or self)
+        popup.title(f"Detalles Xtream — {account.server_name}")
+        popup.geometry("760x470")
+        popup.minsize(620, 420)
+        popup.transient(self.saved_window or self)
+
+        container = ttk.Frame(popup, padding=16)
+        container.pack(fill="both", expand=True)
+        ttk.Label(container, text="Detalles de la cuenta", font=("Segoe UI", 15, "bold")).grid(
+            row=0, column=0, columnspan=3, sticky="w"
+        )
+        ttk.Label(
+            container,
+            text="La contraseña se muestra porque es necesaria para configurar el reproductor.",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 12))
+
+        fields = _account_detail_fields(account)
+        for row, (label, value) in enumerate(fields, start=2):
+            ttk.Label(container, text=f"{label}:").grid(
+                row=row, column=0, sticky="w", padx=(0, 8), pady=3
+            )
+            value_var = tk.StringVar(value=value)
+            entry = ttk.Entry(container, textvariable=value_var, state="readonly")
+            entry.grid(row=row, column=1, sticky="ew", pady=3)
+            ttk.Button(
+                container,
+                text="Copiar",
+                command=lambda text=value: _copy_to_clipboard(popup, text),
+            ).grid(row=row, column=2, padx=(8, 0), pady=3)
+
+        container.columnconfigure(1, weight=1)
+        actions = ttk.Frame(container)
+        actions.grid(row=len(fields) + 2, column=0, columnspan=3, sticky="e", pady=(14, 0))
+        all_details = "\n".join(f"{label}: {value}" for label, value in fields)
+        ttk.Button(
+            actions,
+            text="Copiar todos",
+            command=lambda: _copy_to_clipboard(popup, all_details),
+        ).pack(side="left")
+        ttk.Button(actions, text="Cerrar", command=popup.destroy).pack(side="left", padx=(8, 0))
 
     def _open_channel_details(
         self, account: XtreamAccount, account_table: ttk.Treeview, account_item: str
@@ -889,6 +960,31 @@ def _account_row(account: XtreamAccount) -> tuple[str, ...]:
         _format_date(account.validated_at),
         _format_date(account.valid_until),
     )
+
+
+def _account_detail_fields(account: XtreamAccount) -> tuple[tuple[str, str], ...]:
+    """Prepara todos los datos visibles y copiables de una cuenta Xtream."""
+
+    return (
+        ("Servidor", account.server_name),
+        ("URL del portal", account.access_url),
+        ("Usuario", account.username),
+        ("Contraseña", account.password),
+        ("URL de lista M3U", xtream_playlist_url(account)),
+        ("Estado", _account_row(account)[3]),
+        ("Última validación", _format_date(account.validated_at)),
+        ("Caducidad", _format_date(account.valid_until)),
+        ("GUID", account.account_guid or "—"),
+    )
+
+
+def _copy_to_clipboard(widget: tk.Misc, value: str) -> None:
+    """Copia un valor completo al portapapeles del sistema."""
+
+    widget.clipboard_clear()
+    widget.clipboard_append(value)
+    # Fuerza a Tk a publicar el contenido antes de que se cierre el diálogo.
+    widget.update_idletasks()
 
 
 def _server_filter_values(accounts: tuple[XtreamAccount, ...]) -> tuple[str, ...]:
