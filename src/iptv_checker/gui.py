@@ -145,6 +145,7 @@ class CheckerApp(tk.Tk):
         for column, width in zip(columns, widths):
             table.heading(column, text=headings[column])
             table.column(column, width=width, anchor="center" if column == "status" else "w")
+        table.tag_configure("obsolete", foreground="#c62828")
         table.pack(fill="both", expand=True)
         ttk.Label(
             container,
@@ -166,7 +167,10 @@ class CheckerApp(tk.Tk):
                 messagebox.showerror("No se pudo abrir", str(exc), parent=window)
                 return
             for account in accounts:
-                item = table.insert("", "end", values=_account_row(account))
+                item = table.insert(
+                    "", "end", values=_account_row(account),
+                    tags=("obsolete",) if _account_is_obsolete(account) else (),
+                )
                 accounts_by_item[item] = account
                 table.set(item, "live", "Doble clic")
             count_label.configure(text=f"{len(accounts)} cuenta(s) guardada(s)")
@@ -180,12 +184,45 @@ class CheckerApp(tk.Tk):
             except KeyError as exc:
                 messagebox.showerror("No se pudo abrir", str(exc), parent=window)
                 return
+            if _account_is_obsolete(account):
+                obsolete = _mark_account_obsolete(account, self.database_path)
+                accounts_by_item[item] = obsolete
+                table.item(item, values=_account_row(obsolete), tags=("obsolete",))
+                messagebox.showwarning(
+                    "Cuenta obsoleta",
+                    "La cuenta está caducada o ya fue marcada como no disponible.",
+                    parent=window,
+                )
+                return
             table.set(item, "live", "Consultando…")
             self._open_channel_details(account, table, item)
 
         table.bind("<Double-1>", open_channels)
 
+        def delete_obsolete() -> None:
+            if not messagebox.askyesno(
+                "Limpiar cuentas obsoletas",
+                "¿Quieres borrar de la base de datos todas las cuentas caducadas o que no funcionan?",
+                parent=window,
+            ):
+                return
+            try:
+                deleted = XtreamDatabase(self.database_path).delete_obsolete()
+            except (OSError, sqlite3.Error) as exc:
+                messagebox.showerror("No se pudo limpiar", str(exc), parent=window)
+                return
+            refresh()
+            self._log(f"Se eliminaron {deleted} cuenta(s) obsoleta(s).")
+            messagebox.showinfo(
+                "Limpieza completada",
+                f"Se eliminaron {deleted} cuenta(s) obsoleta(s).",
+                parent=window,
+            )
+
         ttk.Button(footer, text="Actualizar", command=refresh).pack(side="right")
+        ttk.Button(
+            footer, text="Limpiar cuentas obsoletas", command=delete_obsolete
+        ).pack(side="right", padx=(0, 8))
         refresh()
 
     def _open_channel_details(
@@ -403,12 +440,25 @@ class CheckerApp(tk.Tk):
                 popup.after(25 if processed else 100, poll)
 
         def failed(error: str) -> None:
+            nonlocal account
+            try:
+                account = _mark_account_obsolete(account, self.database_path)
+            except (OSError, sqlite3.Error) as exc:
+                account = replace(
+                    account, is_valid=False, validated_at=datetime.now(timezone.utc)
+                )
+                self._log(
+                    f"No se pudo guardar como obsoleta {account.server_name}: {exc}"
+                )
             if popup.winfo_exists():
                 summary.configure(text=f"No se pudieron obtener los canales: {error}")
                 start_button.state(["disabled"])
                 stop_button.state(["disabled"])
             if account_table.winfo_exists():
                 account_table.set(account_item, "live", "Error")
+                account_table.set(account_item, "status", "Obsoleta")
+                account_table.item(account_item, tags=("obsolete",))
+            self._log(f"{account.server_name}: marcada como obsoleta ({error}).")
 
         def show_list(details: XtreamDetails) -> None:
             nonlocal channel_count, account
@@ -416,7 +466,7 @@ class CheckerApp(tk.Tk):
                 return
             channel_count = len(details.channels)
             account = replace(
-                account, is_valid=details.status.casefold() == "active",
+                account, is_valid=_details_are_valid(details),
                 validated_at=datetime.now(timezone.utc), valid_until=details.valid_until,
             )
             try:
@@ -443,12 +493,18 @@ class CheckerApp(tk.Tk):
                 text=f"Lista descargada: {channel_count} canal(es). Aplica un filtro para comenzar."
             )
             start_button.state(["!disabled"])
+            if not account.is_valid:
+                start_button.state(["disabled"])
+                channel_log.configure(text="Cuenta obsoleta: no se comprobarán sus canales.")
             self._log(f"{account.server_name}: lista descargada ({channel_count} canales).")
             if account_table.winfo_exists():
                 account_table.set(account_item, "live", str(channel_count))
                 account_table.set(account_item, "status", _account_row(account)[3])
                 account_table.set(account_item, "validated", _account_row(account)[5])
                 account_table.set(account_item, "expires", _account_row(account)[6])
+                account_table.item(
+                    account_item, tags=("obsolete",) if _account_is_obsolete(account) else ()
+                )
 
         def show_check(item: str, check: CheckResult) -> None:
             nonlocal available_count, checked_count
@@ -657,7 +713,11 @@ def _apply_live_check(table: ttk.Treeview, item: str, check: CheckResult) -> Non
 
 
 def _account_row(account: XtreamAccount) -> tuple[str, ...]:
-    status = {True: "Válida", False: "No válida", None: "Sin validar"}[account.is_valid]
+    status = (
+        "Obsoleta"
+        if _account_is_obsolete(account)
+        else {True: "Válida", None: "Sin validar"}[account.is_valid]
+    )
     return (
         account.server_name,
         account.access_url,
@@ -667,6 +727,37 @@ def _account_row(account: XtreamAccount) -> tuple[str, ...]:
         _format_date(account.validated_at),
         _format_date(account.valid_until),
     )
+
+
+def _account_is_obsolete(
+    account: XtreamAccount, *, now: datetime | None = None
+) -> bool:
+    """Considera obsoleta una cuenta fallida o caducada por fecha."""
+
+    current = now or datetime.now(timezone.utc)
+    expires = account.valid_until
+    if expires is not None and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    return account.is_valid is False or (expires is not None and expires <= current)
+
+
+def _details_are_valid(details: XtreamDetails, *, now: datetime | None = None) -> bool:
+    """Valida conjuntamente el estado que devuelve Xtream y su caducidad."""
+
+    placeholder = XtreamAccount(
+        "", "", "", "", details.status.casefold() == "active", valid_until=details.valid_until
+    )
+    return not _account_is_obsolete(placeholder, now=now)
+
+
+def _mark_account_obsolete(
+    account: XtreamAccount, database_path: str | Path
+) -> XtreamAccount:
+    """Persiste que una cuenta dejó de responder o ya está caducada."""
+
+    obsolete = replace(account, is_valid=False, validated_at=datetime.now(timezone.utc))
+    XtreamDatabase(database_path).save(obsolete)
+    return obsolete
 
 
 def _format_date(value: datetime | None) -> str:

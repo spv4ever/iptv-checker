@@ -63,6 +63,9 @@ interfaz incluso con listas grandes.
 Al consultar los canales también se actualizan en SQLite el estado, la fecha de
 validación y la caducidad devuelta por la cuenta Xtream. El panel **Actividad** y
 el estado de la ventana de canales indican qué fase se está ejecutando.
+Si la fecha ya ha vencido o la API no responde al abrir la cuenta, ésta queda
+marcada en rojo como **Obsoleta**. El botón **Limpiar cuentas obsoletas** permite
+borrar de SQLite, previa confirmación, todas las cuentas caducadas o fallidas.
 
 Haz doble clic en cualquier canal para abrirlo directamente en la ventana nativa
 del primer reproductor disponible: **mpv**, **ffplay** o **VLC**. No se crea una

@@ -6,11 +6,13 @@ from unittest.mock import Mock, patch
 
 from iptv_checker.checker import CheckResult
 from iptv_checker.gui import (
+    _account_is_obsolete,
     _account_row,
     _apply_live_check,
     _check_live_channels,
     _channel_matches_filters,
     _filter_live_rows,
+    _details_are_valid,
     _live_worker_count,
     _open_stream,
     _player_command,
@@ -174,6 +176,22 @@ class SavedAccountsViewTest(unittest.TestCase):
         account = XtreamAccount("Servidor", "https://example.com", "bob", "clave")
 
         self.assertEqual(_account_row(account)[3], "Sin validar")
+
+    def test_marks_expired_account_as_obsolete(self) -> None:
+        account = XtreamAccount(
+            "Servidor", "https://example.com", "bob", "clave", True,
+            valid_until=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(_account_is_obsolete(account))
+        self.assertEqual(_account_row(account)[3], "Obsoleta")
+
+    def test_rejects_active_details_when_expiration_has_passed(self) -> None:
+        details = XtreamDetails(
+            "Active", datetime(2020, 1, 1, tzinfo=timezone.utc), 0, 1, ()
+        )
+
+        self.assertFalse(_details_are_valid(details))
 
     def test_saves_available_xtream_url_after_checking_it(self) -> None:
         with TemporaryDirectory() as directory:
