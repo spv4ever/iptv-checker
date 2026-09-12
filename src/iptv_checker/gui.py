@@ -11,6 +11,7 @@ import sqlite3
 from threading import Thread
 import tkinter as tk
 from tkinter import messagebox, ttk
+import webbrowser
 
 from .checker import CheckResult, PlaylistChecker
 from .playlist import Channel, parse_urls
@@ -191,7 +192,34 @@ class CheckerApp(tk.Tk):
             table.heading(column, text=heading)
             table.column(column, width=width, anchor="center" if column in {"id", "format"} else "w")
         table.pack(fill="both", expand=True)
+        ttk.Label(
+            container,
+            text="Haz doble clic en un canal para reproducirlo en el reproductor predeterminado.",
+        ).pack(anchor="w", pady=(6, 0))
         result_queue: Queue[XtreamDetails | Exception] = Queue()
+
+        def play_channel(event: tk.Event[tk.Misc]) -> None:
+            item = table.identify_row(event.y)
+            if not item:
+                return
+            direct_url = table.set(item, "url")
+            try:
+                opened = _open_stream(direct_url)
+            except (OSError, webbrowser.Error) as exc:
+                messagebox.showerror(
+                    "No se pudo reproducir",
+                    f"No se pudo abrir el canal:\n{exc}",
+                    parent=popup,
+                )
+                return
+            if not opened:
+                messagebox.showerror(
+                    "No se pudo reproducir",
+                    "No hay un reproductor o navegador disponible para abrir el canal.",
+                    parent=popup,
+                )
+
+        table.bind("<Double-1>", play_channel)
 
         def load() -> None:
             try:
@@ -371,6 +399,12 @@ def _format_connections(active: int | None, maximum: int | None) -> str:
     if active is None and maximum is None:
         return "—"
     return f"{active if active is not None else '—'} / {maximum if maximum is not None else '—'}"
+
+
+def _open_stream(url: str) -> bool:
+    """Abre un stream en el reproductor o navegador predeterminado del sistema."""
+
+    return webbrowser.open(url, new=2)
 
 
 def main() -> None:
