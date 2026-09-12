@@ -9,6 +9,7 @@ from iptv_checker.gui import (
     _account_row,
     _check_live_channels,
     _open_stream,
+    _player_command,
     _save_available_account,
 )
 from iptv_checker.playlist import Channel
@@ -43,17 +44,17 @@ class SavedAccountsViewTest(unittest.TestCase):
         self.assertEqual([result.available for result in results], [True, False])
 
     @patch("iptv_checker.gui.subprocess.Popen")
-    @patch("iptv_checker.gui._vlc_executable", return_value="/usr/bin/vlc")
-    def test_opens_authenticated_channel_in_vlc(self, _vlc_mock, popen_mock) -> None:
+    @patch("iptv_checker.gui._player_command", return_value=("mpv", ["/usr/bin/mpv"]))
+    def test_opens_authenticated_channel_in_player(self, _player_mock, popen_mock) -> None:
         url = "https://tv.example/live/alice/secret/42.ts"
 
-        self.assertTrue(_open_stream(url))
+        self.assertEqual(_open_stream(url), "mpv")
 
         popen_mock.assert_called_once()
-        self.assertEqual(popen_mock.call_args.args[0], ["/usr/bin/vlc", url])
+        self.assertEqual(popen_mock.call_args.args[0], ["/usr/bin/mpv", url])
 
     @patch("iptv_checker.gui.subprocess.Popen")
-    @patch("iptv_checker.gui._vlc_executable", return_value="/usr/bin/vlc")
+    @patch("iptv_checker.gui._player_command", return_value=("VLC", ["/usr/bin/vlc"]))
     def test_removes_copied_message_wrappers_before_opening_vlc(
         self, _vlc_mock, popen_mock
     ) -> None:
@@ -63,9 +64,18 @@ class SavedAccountsViewTest(unittest.TestCase):
 
         self.assertEqual(popen_mock.call_args.args[0], ["/usr/bin/vlc", url])
 
-    @patch("iptv_checker.gui._vlc_executable", return_value=None)
-    def test_reports_when_vlc_is_not_installed(self, _vlc_mock) -> None:
+    @patch("iptv_checker.gui._player_command", return_value=None)
+    def test_reports_when_no_player_is_installed(self, _player_mock) -> None:
         self.assertFalse(_open_stream("https://tv.example/live/u/p/42.ts"))
+
+    @patch("iptv_checker.gui._vlc_executable", return_value="/opt/vlc")
+    @patch("iptv_checker.gui.shutil.which")
+    def test_prefers_mpv_and_falls_back_to_vlc(self, which_mock, _vlc_mock) -> None:
+        which_mock.side_effect = lambda name: "/opt/mpv" if name == "mpv" else None
+        self.assertEqual(_player_command(), ("mpv", ["/opt/mpv", "--force-window=yes"]))
+
+        which_mock.side_effect = lambda _name: None
+        self.assertEqual(_player_command(), ("VLC", ["/opt/vlc"]))
 
     def test_formats_saved_account_without_exposing_password(self) -> None:
         account = XtreamAccount(

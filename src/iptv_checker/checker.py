@@ -37,12 +37,17 @@ class PlaylistChecker:
         started = monotonic()
         request = Request(
             channel.url,
-            headers={"User-Agent": "iptv-checker/0.1", "Range": "bytes=0-0"},
+            # Muchos servidores IPTV rechazan las peticiones Range aunque el
+            # stream se pueda reproducir. Abrimos un GET normal y consumimos
+            # solamente un byte para validar la entrega real de contenido.
+            headers={"User-Agent": "iptv-checker/0.1", "Accept": "*/*"},
         )
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 status = response.status
                 available = 200 <= status < 400
+                if available:
+                    response.read(1)
                 error = None if available else f"HTTP {status}"
         except HTTPError as exc:
             status, available, error = exc.code, False, f"HTTP {exc.code}"

@@ -36,6 +36,7 @@ class CheckerApp(tk.Tk):
         self.database_path = Path(database_path)
         self.saved_window: tk.Toplevel | None = None
         self._build_ui()
+        self._log("Aplicación iniciada. Esperando una lista o URL Xtream.")
 
     def _build_ui(self) -> None:
         container = ttk.Frame(self, padding=16)
@@ -86,6 +87,21 @@ class CheckerApp(tk.Tk):
         self.progress.pack(fill="x", pady=(10, 4))
         self.status_label = ttk.Label(container, text="Listo")
         self.status_label.pack(anchor="w")
+
+        ttk.Label(container, text="Actividad", font=("Segoe UI", 10, "bold")).pack(
+            anchor="w", pady=(8, 2)
+        )
+        self.log_text = tk.Text(container, height=5, wrap="word", state="disabled")
+        self.log_text.pack(fill="x")
+
+    def _log(self, message: str) -> None:
+        """Añade una línea visible al registro de actividad."""
+
+        stamp = datetime.now().strftime("%H:%M:%S")
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", f"[{stamp}] {message}\n")
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
 
     def open_saved_database(self) -> None:
         """Abre una ventana con las cuentas Xtream almacenadas localmente."""
@@ -204,24 +220,23 @@ class CheckerApp(tk.Tk):
         table.pack(fill="both", expand=True)
         ttk.Label(
             container,
-            text="Primero se comprueba cada stream. Sólo los accesibles se pueden abrir en VLC.",
+            text=("La lista se descarga primero. Doble clic abre el canal con mpv, ffplay "
+                  "o VLC, incluso mientras se comprueba."),
         ).pack(anchor="w", pady=(6, 0))
-        result_queue: Queue[tuple[XtreamDetails, list[CheckResult]] | Exception] = Queue()
+        channel_log = ttk.Label(container, text="Preparando descarga…")
+        channel_log.pack(anchor="w", pady=(3, 0))
+        result_queue: Queue[tuple[str, object]] = Queue()
+        items_by_url: dict[str, str] = {}
+        channel_count = 0
+        available_count = 0
 
         def play_channel(event: tk.Event[tk.Misc]) -> None:
             item = table.identify_row(event.y)
             if not item:
                 return
             direct_url = table.set(item, "url")
-            if "ok" not in table.item(item, "tags"):
-                messagebox.showwarning(
-                    "Canal no accesible",
-                    "Este stream no superó la comprobación y no se enviará a VLC.",
-                    parent=popup,
-                )
-                return
             try:
-                opened = _open_stream(direct_url)
+                player = _open_stream(direct_url)
             except OSError as exc:
                 messagebox.showerror(
                     "No se pudo reproducir",
@@ -229,11 +244,16 @@ class CheckerApp(tk.Tk):
                     parent=popup,
                 )
                 return
-            if not opened:
+            if not player:
                 messagebox.showerror(
                     "No se pudo reproducir",
-                    "No se encontró VLC. Instálalo o añádelo al PATH para reproducir canales.",
+                    "No se encontró un reproductor compatible. Instala mpv, ffplay o VLC "
+                    "y añádelo al PATH.",
                     parent=popup,
+                )
+            else:
+                channel_log.configure(
+                    text=f"Reproduciendo con {player}: {table.set(item, 'name')}"
                 )
 
         table.bind("<Double-1>", play_channel)
@@ -241,25 +261,44 @@ class CheckerApp(tk.Tk):
         def load() -> None:
             try:
                 details = XtreamClient(account).details()
-                # La API puede anunciar canales que ya no tienen un stream
-                # operativo. Se prueba cada URL antes de mostrársela al usuario.
-                checks = _check_live_channels(details)
-                result_queue.put((details, checks))
+                # Publicar la lista antes de iniciar las pruebas evita que una
+                # lista grande parezca bloqueada durante varios minutos.
+                result_queue.put(("details", details))
+                checker = PlaylistChecker(
+                    timeout=8, workers=min(10, max(1, len(details.channels)))
+                )
+                with ThreadPoolExecutor(max_workers=checker.workers) as executor:
+                    futures = [
+                        executor.submit(checker.check, Channel(c.name, c.direct_url))
+                        for c in details.channels
+                    ]
+                    for future in as_completed(futures):
+                        result_queue.put(("check", future.result()))
+                result_queue.put(("done", details))
             except Exception as exc:  # Se comunica el error de la tarea al hilo de la interfaz.
-                result_queue.put(exc)
+                result_queue.put(("error", exc))
 
         def poll() -> None:
             try:
-                result = result_queue.get_nowait()
+                kind, payload = result_queue.get_nowait()
             except Empty:
                 if popup.winfo_exists():
                     popup.after(100, poll)
                 return
-            if isinstance(result, Exception):
-                failed(str(result))
-            else:
-                details, checks = result
-                show(details, checks)
+            if kind == "error":
+                failed(str(payload))
+                return
+            if kind == "details":
+                show_list(payload)  # type: ignore[arg-type]
+            elif kind == "check":
+                show_check(payload)  # type: ignore[arg-type]
+            elif kind == "done":
+                channel_log.configure(
+                    text=(f"Comprobación finalizada: {available_count}/"
+                          f"{channel_count} accesibles")
+                )
+                return
+            popup.after(25, poll)
 
         def failed(error: str) -> None:
             if popup.winfo_exists():
@@ -267,32 +306,42 @@ class CheckerApp(tk.Tk):
             if account_table.winfo_exists():
                 account_table.set(account_item, "live", "Error")
 
-        def show(details: XtreamDetails, checks: list[CheckResult]) -> None:
+        def show_list(details: XtreamDetails) -> None:
+            nonlocal channel_count
             if not popup.winfo_exists():
                 return
-            checked_by_url = {check.channel.url: check for check in checks}
-            ordered_channels = sorted(
-                details.channels,
-                key=lambda channel: not checked_by_url[channel.direct_url].available,
-            )
-            for channel in ordered_channels:
-                check = checked_by_url[channel.direct_url]
-                access = "Accesible" if check.available else "No accesible"
-                table.insert(
+            channel_count = len(details.channels)
+            for channel in details.channels:
+                item = table.insert(
                     "", "end",
                     values=(channel.stream_id, channel.name, channel.category_name,
-                            channel.container_extension, access, channel.direct_url),
-                    tags=("ok" if check.available else "error",),
+                            channel.container_extension, "Pendiente", channel.direct_url),
                 )
-            available = sum(check.available for check in checks)
+                items_by_url[channel.direct_url] = item
             connections = _format_connections(details.active_connections, details.max_connections)
             summary.configure(
                 text=(f"Estado: {details.status} · Caducidad: {_format_date(details.valid_until)} "
-                      f"· Conexiones: {connections} · {available}/{len(details.channels)} "
-                      "canal(es) accesible(s)")
+                      f"· Conexiones: {connections} · {channel_count} canal(es) descargados")
             )
+            channel_log.configure(text=f"Lista descargada. Comprobando 0/{channel_count} streams…")
+            self._log(f"{account.server_name}: lista descargada ({channel_count} canales).")
             if account_table.winfo_exists():
-                account_table.set(account_item, "live", f"{available}/{len(details.channels)}")
+                account_table.set(account_item, "live", str(channel_count))
+
+        def show_check(check: CheckResult) -> None:
+            nonlocal available_count
+            item = items_by_url.get(check.channel.url)
+            if not item or not table.exists(item):
+                return
+            if check.available:
+                available_count += 1
+            table.set(item, "availability", "Accesible" if check.available else "No accesible")
+            table.item(item, tags=("ok" if check.available else "error",))
+            checked = sum(
+                table.set(row, "availability") != "Pendiente"
+                for row in table.get_children()
+            )
+            channel_log.configure(text=f"Comprobando {checked}/{channel_count}: {check.channel.name}")
 
         Thread(target=load, daemon=True).start()
         popup.after(100, poll)
@@ -332,6 +381,7 @@ class CheckerApp(tk.Tk):
         self.saved = 0
         self.progress.configure(maximum=self.total, value=0)
         self.status_label.configure(text=f"Comprobando 0 de {self.total}...")
+        self._log(f"Iniciando comprobación de {self.total} URL(s), timeout {timeout:g} s.")
         self.check_button.state(["disabled"])
 
         Thread(target=self._check_in_background, args=(parsed.channels, timeout), daemon=True).start()
@@ -365,6 +415,10 @@ class CheckerApp(tk.Tk):
                     f"{self.saved} cuenta(s) guardada(s)."
                 )
             )
+            self._log(
+                f"Comprobación finalizada: {self.completed} URL(s), "
+                f"{self.saved} cuenta(s) guardada(s)."
+            )
         else:
             self.after(100, self._read_results)
 
@@ -388,6 +442,12 @@ class CheckerApp(tk.Tk):
         )
         self.progress.configure(value=self.completed)
         self.status_label.configure(text=f"Comprobando {self.completed} de {self.total}...")
+        state = (
+            "disponible"
+            if result.available
+            else f"no disponible ({result.error or 'sin respuesta'})"
+        )
+        self._log(f"{result.channel.url}: {state} en {result.elapsed_ms} ms.")
 
 
 def _save_available_account(result: CheckResult, database_path: str | Path) -> bool:
@@ -441,22 +501,35 @@ def _format_connections(active: int | None, maximum: int | None) -> str:
     return f"{active if active is not None else '—'} / {maximum if maximum is not None else '—'}"
 
 
-def _open_stream(url: str) -> bool:
-    """Reproduce directamente un stream autenticado mediante VLC."""
+def _open_stream(url: str) -> str | None:
+    """Abre el stream con el primer reproductor multimedia disponible."""
 
-    executable = _vlc_executable()
-    if executable is None:
-        return False
+    player = _player_command()
+    if player is None:
+        return None
+    name, command = player
 
     # La URL directa construida por XtreamClient ya incorpora el usuario y la
     # contraseña escapados. Se pasa como un único argumento (sin shell) para
-    # que VLC pueda autenticarse sin abrir el navegador.
+    # que el reproductor pueda autenticarse sin abrir el navegador.
     subprocess.Popen(
-        [executable, normalize_url(url)],
+        [*command, normalize_url(url)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    return True
+    return name
+
+
+def _player_command() -> tuple[str, list[str]] | None:
+    """Prioriza reproductores fiables y conserva VLC como último recurso."""
+
+    for name, arguments in (("mpv", ["--force-window=yes"]),
+                            ("ffplay", ["-autoexit", "-loglevel", "warning"])):
+        executable = shutil.which(name)
+        if executable:
+            return name, [executable, *arguments]
+    executable = _vlc_executable()
+    return ("VLC", [executable]) if executable else None
 
 
 def _vlc_executable() -> str | None:
