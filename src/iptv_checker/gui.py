@@ -360,8 +360,8 @@ class CheckerApp(tk.Tk):
             ttk.Label(container, text=f"{label}:").grid(
                 row=row, column=0, sticky="w", padx=(0, 8), pady=3
             )
-            value_var = tk.StringVar(value=value)
-            entry = ttk.Entry(container, textvariable=value_var, state="readonly")
+            entry = ttk.Entry(container)
+            _set_readonly_entry_value(entry, value)
             entry.grid(row=row, column=1, sticky="ew", pady=3)
             ttk.Button(
                 container,
@@ -985,6 +985,13 @@ def _copy_to_clipboard(widget: tk.Misc, value: str) -> None:
     widget.clipboard_append(value)
     # Fuerza a Tk a publicar el contenido antes de que se cierre el diálogo.
     widget.update_idletasks()
+
+
+def _set_readonly_entry_value(entry: ttk.Entry, value: str) -> None:
+    """Rellena una entrada sin depender de una variable local de Tk."""
+
+    entry.insert(0, value)
+    entry.state(["readonly"])
 
 
 def _server_filter_values(accounts: tuple[XtreamAccount, ...]) -> tuple[str, ...]:

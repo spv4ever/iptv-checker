@@ -22,6 +22,7 @@ from iptv_checker.gui import (
     _player_command,
     _save_available_account,
     _server_filter_values,
+    _set_readonly_entry_value,
     _set_live_filters_enabled,
 )
 from iptv_checker.playlist import Channel
@@ -62,6 +63,14 @@ class SavedAccountsViewTest(unittest.TestCase):
         widget.clipboard_clear.assert_called_once_with()
         widget.clipboard_append.assert_called_once_with("contraseña con espacios")
         widget.update_idletasks.assert_called_once_with()
+
+    def test_keeps_detail_value_when_entry_becomes_readonly(self) -> None:
+        entry = Mock()
+
+        _set_readonly_entry_value(entry, "https://tv.example:8080")
+
+        entry.insert.assert_called_once_with(0, "https://tv.example:8080")
+        entry.state.assert_called_once_with(["readonly"])
 
     def test_lists_unique_server_names_for_saved_accounts_filter(self) -> None:
         accounts = (
