@@ -157,6 +157,8 @@ class SavedAccountsViewTest(unittest.TestCase):
         self.assertEqual(command[0], "/opt/mpv")
         self.assertIn("--wid=12345", command)
         self.assertIn("--volume=72", command)
+        self.assertIn("--no-fullscreen", command)
+        self.assertIn("--no-ontop", command)
         self.assertNotIn("SDL_WINDOWID", environment)
 
     @patch("iptv_checker.gui.shutil.which", return_value="/opt/ffplay")
@@ -164,6 +166,7 @@ class SavedAccountsViewTest(unittest.TestCase):
         command, environment = _embedded_player_command("ffplay", 987, 65)
 
         self.assertEqual(command[-2:], ["-volume", "65"])
+        self.assertIn("-noborder", command)
         self.assertEqual(environment["SDL_WINDOWID"], "987")
 
     @patch("iptv_checker.gui.shutil.which", return_value=None)

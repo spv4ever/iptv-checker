@@ -718,6 +718,8 @@ class PlayerWindow(tk.Toplevel):
         self.channel_name = channel_name
         self.on_status = on_status
         self.process: subprocess.Popen[bytes] | None = None
+        self.embedded_window: int | None = None
+        self._embed_attempts = 0
         self.paused = False
         players = _available_players()
 
@@ -735,6 +737,7 @@ class PlayerWindow(tk.Toplevel):
 
         self.video = tk.Frame(shell, background="#101216", highlightthickness=1)
         self.video.pack(fill="both", expand=True)
+        self.video.bind("<Configure>", self._resize_video)
         self.placeholder = tk.Label(
             self.video,
             text="Iniciando reproducción…",
@@ -783,6 +786,12 @@ class PlayerWindow(tk.Toplevel):
                     [*command, self.url], stdin=subprocess.PIPE,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment,
                 )
+                if engine == "ffplay" and sys.platform == "win32":
+                    # SDL_WINDOWID no siempre es respetado por las versiones de
+                    # SDL que distribuye ffplay en Windows. En ese caso se
+                    # incorpora su HWND explícitamente en cuanto sea creado.
+                    self._embed_attempts = 0
+                    self.after(50, self._attach_ffplay_window)
                 break
             except OSError as exc:
                 errors.append(f"{engine}: {exc}")
@@ -827,6 +836,7 @@ class PlayerWindow(tk.Toplevel):
             if self.process and self.process.poll() is None:
                 self.process.terminate()
         self.process = None
+        self.embedded_window = None
         self.paused = False
         if update_status:
             self.placeholder.place(relx=.5, rely=.5, anchor="center")
@@ -855,6 +865,27 @@ class PlayerWindow(tk.Toplevel):
             self.placeholder.place(relx=.5, rely=.5, anchor="center")
             self._set_status("La reproducción ha finalizado")
 
+    def _attach_ffplay_window(self) -> None:
+        """Aloja la ventana nativa de ffplay en el marco Tk bajo Windows."""
+
+        if not self._running() or self.process is None:
+            return
+        self.embedded_window = _embed_windows_process_window(
+            self.process.pid,
+            self.video.winfo_id(),
+            self.video.winfo_width(),
+            self.video.winfo_height(),
+        )
+        if self.embedded_window is None and self._embed_attempts < 40:
+            self._embed_attempts += 1
+            self.after(100, self._attach_ffplay_window)
+
+    def _resize_video(self, _event: tk.Event[tk.Misc]) -> None:
+        if self.embedded_window is not None:
+            _resize_windows_child(
+                self.embedded_window, self.video.winfo_width(), self.video.winfo_height()
+            )
+
     def _set_status(self, text: str) -> None:
         self.status.configure(text=text)
         if callable(self.on_status):
@@ -878,13 +909,65 @@ def _embedded_player_command(
         raise OSError(f"El motor {engine!r} ya no está disponible")
     environment = os.environ.copy()
     if engine == "mpv":
-        return ([executable, f"--wid={window_id}", "--force-window=yes", "--input-terminal=yes",
+        return ([executable, f"--wid={window_id}", "--force-window=yes", "--no-fullscreen",
+                 "--no-ontop", "--input-terminal=yes",
                  f"--volume={volume}"], environment)
     # SDL_WINDOWID hace que la ventana SDL de ffplay utilice el contenedor
     # nativo de Tk en plataformas compatibles (Windows y X11).
     environment["SDL_WINDOWID"] = str(window_id)
-    return ([executable, "-autoexit", "-loglevel", "warning", "-volume", str(volume)],
+    return ([executable, "-autoexit", "-noborder", "-loglevel", "warning",
+             "-volume", str(volume)],
             environment)
+
+
+def _embed_windows_process_window(
+    process_id: int, parent_id: int, width: int, height: int
+) -> int | None:
+    """Busca el HWND de un proceso y lo convierte en hijo del contenedor Tk."""
+
+    if sys.platform != "win32":
+        return None
+
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    matches: list[int] = []
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    @callback_type
+    def find_window(hwnd: int, _parameter: int) -> bool:
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == process_id and user32.IsWindowVisible(hwnd):
+            matches.append(hwnd)
+            return False
+        return True
+
+    user32.EnumWindows(find_window, 0)
+    if not matches:
+        return None
+
+    hwnd = matches[0]
+    style = user32.GetWindowLongW(hwnd, -16)  # GWL_STYLE
+    # Quita los adornos de ventana superior y activa WS_CHILD.
+    style &= ~0x80CF0000  # WS_POPUP | WS_CAPTION | WS_THICKFRAME | controles
+    style |= 0x40000000  # WS_CHILD
+    user32.SetWindowLongW(hwnd, -16, style)
+    user32.SetParent(hwnd, parent_id)
+    user32.MoveWindow(hwnd, 0, 0, max(1, width), max(1, height), True)
+    return int(hwnd)
+
+
+def _resize_windows_child(window_id: int, width: int, height: int) -> None:
+    """Mantiene el vídeo nativo ajustado al tamaño de su marco Tk."""
+
+    if sys.platform == "win32":
+        import ctypes
+
+        ctypes.windll.user32.MoveWindow(
+            window_id, 0, 0, max(1, width), max(1, height), True
+        )
 
 
 def _player_command() -> tuple[str, list[str]] | None:
