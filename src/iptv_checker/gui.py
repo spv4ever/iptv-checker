@@ -14,7 +14,7 @@ from tkinter import messagebox, ttk
 
 from .checker import CheckResult, PlaylistChecker
 from .playlist import Channel, parse_urls
-from .xtream import XtreamAccount, XtreamDatabase, parse_xtream_url
+from .xtream import XtreamAccount, XtreamClient, XtreamDatabase, XtreamDetails, parse_xtream_url
 
 
 class CheckerApp(tk.Tk):
@@ -106,40 +106,136 @@ class CheckerApp(tk.Tk):
         )
         ttk.Label(container, text=f"Archivo: {self.database_path}").pack(anchor="w", pady=(2, 10))
 
-        columns = ("server", "url", "username", "status", "validated", "expires")
+        columns = ("server", "url", "username", "status", "live", "validated", "expires")
         table = ttk.Treeview(container, columns=columns, show="headings")
         headings = {
             "server": "Servidor",
             "url": "URL de acceso",
             "username": "Usuario",
             "status": "Estado",
+            "live": "Canales live",
             "validated": "Última validación",
             "expires": "Caducidad",
         }
-        widths = (145, 220, 120, 90, 145, 145)
+        widths = (135, 190, 105, 85, 100, 135, 135)
         for column, width in zip(columns, widths):
             table.heading(column, text=headings[column])
             table.column(column, width=width, anchor="center" if column == "status" else "w")
         table.pack(fill="both", expand=True)
+        ttk.Label(
+            container,
+            text="Haz doble clic en una cuenta para consultar sus canales en directo.",
+        ).pack(anchor="w", pady=(6, 0))
 
         footer = ttk.Frame(container)
         footer.pack(fill="x", pady=(10, 0))
         count_label = ttk.Label(footer)
         count_label.pack(side="left")
+        accounts_by_item: dict[str, XtreamAccount] = {}
 
         def refresh() -> None:
             table.delete(*table.get_children())
+            accounts_by_item.clear()
             try:
                 accounts = XtreamDatabase(self.database_path).all()
             except (OSError, sqlite3.Error) as exc:
                 messagebox.showerror("No se pudo abrir", str(exc), parent=window)
                 return
             for account in accounts:
-                table.insert("", "end", values=_account_row(account))
+                item = table.insert("", "end", values=_account_row(account))
+                accounts_by_item[item] = account
+                table.set(item, "live", "Doble clic")
             count_label.configure(text=f"{len(accounts)} cuenta(s) guardada(s)")
+
+        def open_channels(_event: tk.Event[tk.Misc]) -> None:
+            item = table.focus()
+            if not item:
+                return
+            try:
+                account = accounts_by_item[item]
+            except KeyError as exc:
+                messagebox.showerror("No se pudo abrir", str(exc), parent=window)
+                return
+            table.set(item, "live", "Consultando…")
+            self._open_channel_details(account, table, item)
+
+        table.bind("<Double-1>", open_channels)
 
         ttk.Button(footer, text="Actualizar", command=refresh).pack(side="right")
         refresh()
+
+    def _open_channel_details(
+        self, account: XtreamAccount, account_table: ttk.Treeview, account_item: str
+    ) -> None:
+        popup = tk.Toplevel(self.saved_window or self)
+        popup.title(f"Canales live — {account.server_name}")
+        popup.geometry("1050x520")
+        popup.minsize(720, 320)
+
+        container = ttk.Frame(popup, padding=16)
+        container.pack(fill="both", expand=True)
+        title = ttk.Label(container, text=account.server_name, font=("Segoe UI", 15, "bold"))
+        title.pack(anchor="w")
+        summary = ttk.Label(container, text="Consultando la API Xtream…")
+        summary.pack(anchor="w", pady=(2, 10))
+
+        columns = ("id", "name", "category", "format", "url")
+        table = ttk.Treeview(container, columns=columns, show="headings")
+        for column, heading, width in (
+            ("id", "ID", 65),
+            ("name", "Canal", 240),
+            ("category", "Categoría", 170),
+            ("format", "Formato", 70),
+            ("url", "URL directa", 440),
+        ):
+            table.heading(column, text=heading)
+            table.column(column, width=width, anchor="center" if column in {"id", "format"} else "w")
+        table.pack(fill="both", expand=True)
+        result_queue: Queue[XtreamDetails | Exception] = Queue()
+
+        def load() -> None:
+            try:
+                result_queue.put(XtreamClient(account).details())
+            except Exception as exc:  # Se comunica el error de la tarea al hilo de la interfaz.
+                result_queue.put(exc)
+
+        def poll() -> None:
+            try:
+                result = result_queue.get_nowait()
+            except Empty:
+                if popup.winfo_exists():
+                    popup.after(100, poll)
+                return
+            if isinstance(result, Exception):
+                failed(str(result))
+            else:
+                show(result)
+
+        def failed(error: str) -> None:
+            if popup.winfo_exists():
+                summary.configure(text=f"No se pudieron obtener los canales: {error}")
+            if account_table.winfo_exists():
+                account_table.set(account_item, "live", "Error")
+
+        def show(details: XtreamDetails) -> None:
+            if not popup.winfo_exists():
+                return
+            for channel in details.channels:
+                table.insert(
+                    "", "end",
+                    values=(channel.stream_id, channel.name, channel.category_name,
+                            channel.container_extension, channel.direct_url),
+                )
+            connections = _format_connections(details.active_connections, details.max_connections)
+            summary.configure(
+                text=(f"Estado: {details.status} · Caducidad: {_format_date(details.valid_until)} "
+                      f"· Conexiones: {connections} · {len(details.channels)} canal(es) live")
+            )
+            if account_table.winfo_exists():
+                account_table.set(account_item, "live", str(len(details.channels)))
+
+        Thread(target=load, daemon=True).start()
+        popup.after(100, poll)
 
     def _close_saved_database(self) -> None:
         if self.saved_window is not None:
@@ -261,6 +357,7 @@ def _account_row(account: XtreamAccount) -> tuple[str, ...]:
         account.access_url,
         account.username,
         status,
+        "—",
         _format_date(account.validated_at),
         _format_date(account.valid_until),
     )
@@ -268,6 +365,12 @@ def _account_row(account: XtreamAccount) -> tuple[str, ...]:
 
 def _format_date(value: datetime | None) -> str:
     return value.astimezone().strftime("%d/%m/%Y %H:%M") if value else "—"
+
+
+def _format_connections(active: int | None, maximum: int | None) -> str:
+    if active is None and maximum is None:
+        return "—"
+    return f"{active if active is not None else '—'} / {maximum if maximum is not None else '—'}"
 
 
 def main() -> None:

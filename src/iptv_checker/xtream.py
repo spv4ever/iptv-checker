@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+import json
 import os
+from pathlib import Path
 import sqlite3
-from urllib.parse import parse_qs, urlsplit, urlunsplit
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +24,114 @@ class XtreamAccount:
     is_valid: bool | None = None
     validated_at: datetime | None = None
     valid_until: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class XtreamChannel:
+    """Canal en directo publicado por una cuenta Xtream."""
+
+    stream_id: int
+    name: str
+    category_id: str
+    category_name: str
+    container_extension: str
+    direct_url: str
+
+
+@dataclass(frozen=True, slots=True)
+class XtreamDetails:
+    """Estado de una cuenta y sus canales en directo."""
+
+    status: str
+    valid_until: datetime | None
+    active_connections: int | None
+    max_connections: int | None
+    channels: tuple[XtreamChannel, ...]
+
+
+class XtreamApiError(RuntimeError):
+    """Respuesta de red o formato no válido de una API Xtream."""
+
+
+class XtreamClient:
+    """Cliente mínimo para consultar datos y canales de una cuenta Xtream."""
+
+    def __init__(self, account: XtreamAccount, *, timeout: float = 10.0) -> None:
+        if timeout <= 0:
+            raise ValueError("timeout debe ser mayor que cero")
+        self.account = account
+        self.timeout = timeout
+
+    def details(self) -> XtreamDetails:
+        account_data = self._request()
+        if not isinstance(account_data, dict):
+            raise XtreamApiError("la API no devolvió información de la cuenta")
+        user_info = account_data.get("user_info")
+        if not isinstance(user_info, dict):
+            raise XtreamApiError("la API no devolvió información de la cuenta")
+
+        categories_data = self._request("get_live_categories")
+        streams_data = self._request("get_live_streams")
+        if not isinstance(categories_data, list) or not isinstance(streams_data, list):
+            raise XtreamApiError("la API no devolvió una lista de canales válida")
+
+        categories = {
+            str(item.get("category_id")): str(item.get("category_name", ""))
+            for item in categories_data
+            if isinstance(item, dict) and item.get("category_id") is not None
+        }
+        channels = tuple(
+            self._parse_channel(item, categories)
+            for item in streams_data
+            if isinstance(item, dict)
+        )
+        return XtreamDetails(
+            status=str(user_info.get("status", "Desconocido")),
+            valid_until=expiration_from_api(user_info.get("exp_date")),
+            active_connections=_optional_int(user_info.get("active_cons")),
+            max_connections=_optional_int(user_info.get("max_connections")),
+            channels=channels,
+        )
+
+    def _request(self, action: str | None = None) -> object:
+        query = {"username": self.account.username, "password": self.account.password}
+        if action:
+            query["action"] = action
+        url = f"{self.account.access_url}/player_api.php?{urlencode(query)}"
+        request = Request(url, headers={"User-Agent": "iptv-checker/0.1"})
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                return json.loads(response.read().decode("utf-8-sig"))
+        except HTTPError as exc:
+            raise XtreamApiError(f"la API respondió HTTP {exc.code}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            reason = exc.reason if isinstance(exc, URLError) else exc
+            raise XtreamApiError(f"no se pudo conectar con la API: {reason}") from exc
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise XtreamApiError("la API devolvió una respuesta no válida") from exc
+
+    def _parse_channel(
+        self, item: dict[str, object], categories: dict[str, str]
+    ) -> XtreamChannel:
+        try:
+            stream_id = int(item["stream_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise XtreamApiError("un canal no contiene un identificador válido") from exc
+        category_id = str(item.get("category_id", ""))
+        extension = str(item.get("container_extension") or "ts")
+        direct_url = (
+            f"{self.account.access_url}/live/"
+            f"{quote(self.account.username, safe='')}/{quote(self.account.password, safe='')}/"
+            f"{stream_id}.{quote(extension, safe='')}"
+        )
+        return XtreamChannel(
+            stream_id=stream_id,
+            name=str(item.get("name") or f"Canal {stream_id}"),
+            category_id=category_id,
+            category_name=categories.get(category_id, "Sin categoría"),
+            container_extension=extension,
+            direct_url=direct_url,
+        )
 
 
 def parse_xtream_url(url: str, *, server_name: str | None = None) -> XtreamAccount:
@@ -66,6 +177,15 @@ def expiration_from_api(value: str | int | None) -> datetime | None:
         return datetime.fromtimestamp(int(value), tz=timezone.utc)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError("exp_date no es una marca de tiempo Unix válida") from exc
+
+
+def _optional_int(value: object) -> int | None:
+    if value in (None, "", "null"):
+        return None
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
 
 
 class XtreamDatabase:
