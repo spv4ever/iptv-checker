@@ -11,6 +11,7 @@ from iptv_checker.gui import (
     _check_live_channels,
     _channel_matches_filters,
     _embedded_player_command,
+    _filter_live_rows,
     _live_worker_count,
     _open_stream,
     _player_command,
@@ -21,6 +22,17 @@ from iptv_checker.xtream import XtreamAccount, XtreamChannel, XtreamDatabase, Xt
 
 
 class SavedAccountsViewTest(unittest.TestCase):
+    def test_selects_only_live_rows_matching_both_filters(self) -> None:
+        rows = [
+            ("row-1", (1, "Noticias 24", "España", "ts", "Pendiente", "http://one")),
+            ("row-2", (2, "Cine Plus", "España", "ts", "Pendiente", "http://two")),
+            ("row-3", (3, "Noticias MX", "México", "ts", "Pendiente", "http://three")),
+        ]
+
+        selected = _filter_live_rows(rows, "noticias", "España")
+
+        self.assertEqual([item for item, _values in selected], ["row-1"])
+
     def test_filters_channels_by_free_text_and_category(self) -> None:
         self.assertTrue(
             _channel_matches_filters("Canal Noticias HD", "España", "noticias", "Todas")
