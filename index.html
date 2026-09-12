@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Organiza listas IPTV localmente y separa servidor, usuario y contraseña." />
+    <title>StreamSort — Organizador IPTV</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="glow glow-one"></div><div class="glow glow-two"></div>
+    <main>
+      <nav>
+        <a class="brand" href="#" aria-label="StreamSort, inicio"><span class="brand-mark">S</span><span>Stream<span>Sort</span></span></a>
+        <div class="privacy"><span></span> Procesamiento local</div>
+      </nav>
+
+      <header>
+        <div class="eyebrow"><span>01</span> ORGANIZA TU LISTA</div>
+        <h1>Convierte el caos<br />en una lista <em>limpia.</em></h1>
+        <p>Pega tu contenido y separaremos automáticamente el servidor, usuario y contraseña. Sin subir datos, sin ruido.</p>
+      </header>
+
+      <section class="workspace" aria-label="Organizador de direcciones">
+        <div class="input-panel">
+          <div class="panel-heading">
+            <div><span class="step">1</span><h2>Pega tu lista</h2></div>
+            <button id="clearBtn" class="text-button" type="button">Limpiar</button>
+          </div>
+          <div class="editor-wrap">
+            <div class="line-number" aria-hidden="true">01<br />02<br />03<br />04<br />05</div>
+            <textarea id="source" spellcheck="false" placeholder="USAR VPN AMERICA&#10;http://servidor.com:8080/get.php?username=usuario&amp;password=clave&amp;type=m3u_plus"></textarea>
+          </div>
+          <div class="input-footer"><span id="lineCount">0 líneas</span><span>Los textos que no sean URL se descartan</span></div>
+        </div>
+
+        <div class="action-column">
+          <button id="processBtn" class="process-button" type="button" aria-label="Procesar lista"><span>→</span></button>
+          <small>PROCESAR</small>
+        </div>
+
+        <div class="result-panel">
+          <div class="panel-heading">
+            <div><span class="step mint">2</span><h2>Resultado</h2></div>
+            <span id="validBadge" class="badge">0 válidas</span>
+          </div>
+          <div id="emptyState" class="empty-state">
+            <div class="empty-icon"><span>✓</span></div>
+            <h3>Todo listo para empezar</h3>
+            <p>Las direcciones procesadas aparecerán aquí, ordenadas y listas para exportar.</p>
+          </div>
+          <div id="results" class="results" hidden></div>
+          <div id="resultActions" class="result-actions" hidden>
+            <button id="copyBtn" type="button">Copiar CSV</button>
+            <button id="downloadBtn" class="primary" type="button">Descargar CSV</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="notice">
+        <span class="notice-icon">i</span>
+        <div><strong>Validación estructural y privada</strong><p>La herramienta comprueba el formato y los campos obligatorios en tu navegador. No contacta con servidores externos ni verifica credenciales.</p></div>
+      </aside>
+
+      <footer><span>STREAMSORT / UTILIDAD LOCAL</span><span>TUS DATOS NO SALEN DE ESTE DISPOSITIVO</span></footer>
+    </main>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
