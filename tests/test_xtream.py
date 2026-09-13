@@ -89,7 +89,7 @@ class XtreamDatabaseTest(unittest.TestCase):
             self.assertEqual(identifier, same_identifier)
             self.assertTrue(database.all()[0].is_valid)
 
-    def test_selects_at_most_five_pending_accounts_per_server(self) -> None:
+    def test_selects_a_configurable_global_batch_in_insertion_order(self) -> None:
         with TemporaryDirectory() as directory:
             database = XtreamDatabase(Path(directory) / "xtream.db")
             for server in ("https://one", "https://two"):
@@ -99,14 +99,24 @@ class XtreamDatabaseTest(unittest.TestCase):
                     )
             database.save(XtreamAccount("Uno", "https://one", "user-0", "pass", True))
 
-            pending = database.pending_batches()
+            pending = database.pending_batches(8)
 
-            self.assertEqual(len(pending), 10)
+            self.assertEqual(len(pending), 8)
             self.assertEqual(
-                {server: sum(account.access_url == server for account in pending)
-                 for server in ("https://one", "https://two")},
-                {"https://one": 5, "https://two": 5},
+                [(account.access_url, account.username) for account in pending],
+                [
+                    *(("https://one", f"user-{index}") for index in range(1, 7)),
+                    ("https://two", "user-0"),
+                    ("https://two", "user-1"),
+                ],
             )
+
+    def test_rejects_invalid_pending_batch_size(self) -> None:
+        with TemporaryDirectory() as directory:
+            database = XtreamDatabase(Path(directory) / "xtream.db")
+
+            with self.assertRaises(ValueError):
+                database.pending_batches(0)
 
     def test_keeps_changed_credentials_as_a_distinct_account(self) -> None:
         with TemporaryDirectory() as directory:
