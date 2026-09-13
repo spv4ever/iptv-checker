@@ -306,24 +306,20 @@ class XtreamDatabase:
             ).fetchone()
         return int(row["id"]), cursor.rowcount == 1
 
-    def pending_batches(self, limit_per_server: int = 5) -> tuple[XtreamAccount, ...]:
-        """Devuelve las primeras cuentas pendientes de cada servidor."""
+    def pending_batches(self, limit: int = 10) -> tuple[XtreamAccount, ...]:
+        """Devuelve un lote global de pendientes en el orden en que se guardaron."""
 
-        if limit_per_server <= 0:
-            raise ValueError("limit_per_server debe ser mayor que cero")
+        if limit <= 0:
+            raise ValueError("limit debe ser mayor que cero")
         with self._connect() as connection:
             rows = connection.execute(
                 """SELECT server_name, access_url, username, password, is_valid,
                           validated_at, valid_until, account_guid
-                   FROM (
-                       SELECT *, ROW_NUMBER() OVER (
-                           PARTITION BY access_url ORDER BY id
-                       ) AS server_position
-                       FROM xtream_accounts WHERE is_valid IS NULL
-                   )
-                   WHERE server_position <= ?
-                   ORDER BY access_url, server_position""",
-                (limit_per_server,),
+                   FROM xtream_accounts
+                   WHERE is_valid IS NULL
+                   ORDER BY id
+                   LIMIT ?""",
+                (limit,),
             ).fetchall()
         return tuple(_account_from_row(row) for row in rows)
 

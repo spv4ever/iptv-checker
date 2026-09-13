@@ -75,6 +75,11 @@ class CheckerApp(tk.Tk):
         ttk.Spinbox(controls, from_=1, to=60, width=5, textvariable=self.timeout).pack(
             side="left", padx=(6, 14)
         )
+        ttk.Label(controls, text="Cuentas por lote:").pack(side="left")
+        self.batch_size = tk.StringVar(value="10")
+        ttk.Spinbox(
+            controls, from_=1, to=10000, width=7, textvariable=self.batch_size
+        ).pack(side="left", padx=(6, 14))
         self.check_button = ttk.Button(
             controls, text="Guardar pendientes", command=self.start_check
         )
@@ -729,7 +734,7 @@ class CheckerApp(tk.Tk):
             messagebox.showwarning("Líneas ignoradas", "\n".join(warnings))
 
     def start_pending_check(self) -> None:
-        """Comprueba hasta cinco cuentas pendientes de cada servidor."""
+        """Comprueba el siguiente lote global de cuentas pendientes."""
 
         try:
             timeout = float(self.timeout.get())
@@ -738,7 +743,16 @@ class CheckerApp(tk.Tk):
         except ValueError:
             messagebox.showerror("Dato incorrecto", "El tiempo máximo debe ser mayor que cero.")
             return
-        accounts = XtreamDatabase(self.database_path).pending_batches(5)
+        try:
+            batch_size = int(self.batch_size.get())
+            if batch_size <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror(
+                "Dato incorrecto", "Las cuentas por lote deben ser un número entero mayor que cero."
+            )
+            return
+        accounts = XtreamDatabase(self.database_path).pending_batches(batch_size)
         if not accounts:
             messagebox.showinfo("Sin pendientes", "No hay cuentas pendientes de validación.")
             return
@@ -749,7 +763,9 @@ class CheckerApp(tk.Tk):
         self.check_button.state(["disabled"])
         self.validate_button.state(["disabled"])
         self.status_label.configure(text=f"Validando 0 de {self.total}...")
-        self._log(f"Validando un lote de {self.total} cuenta(s), máximo 5 por servidor.")
+        self._log(
+            f"Validando el siguiente lote de {self.total} cuenta(s) en orden de guardado."
+        )
         Thread(target=self._check_pending_in_background, args=(accounts, timeout), daemon=True).start()
         self.after(100, self._read_pending_results)
 

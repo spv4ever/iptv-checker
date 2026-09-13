@@ -15,8 +15,10 @@ También puedes abrir `iniciar.bat` con doble clic.
 
 Pega una URL Xtream `http://` o `https://` por línea y pulsa **Guardar
 pendientes**. Esta primera fase sólo valida el formato y guarda las cuentas, sin
-conectarse a ningún servidor. Después, **Validar siguiente lote** comprueba como
-máximo las cinco primeras cuentas pendientes de cada servidor.
+conectarse a ningún servidor. El campo **Cuentas por lote** permite elegir
+cuántas se procesarán al pulsar **Validar siguiente lote**. Las cuentas se toman
+de una única cola, en el mismo orden en que se guardaron, sin agruparlas por
+servidor.
 
 Requiere Python 3.10 o posterior. La interfaz utiliza Tkinter, incluido en la
 instalación normal de Python para Windows.
@@ -50,8 +52,8 @@ Desde la aplicación gráfica también puedes pulsar **Base de datos guardados**
 para consultar las cuentas almacenadas, su estado y sus fechas de validación y
 caducidad. Cada URL Xtream que termina la comprobación con resultado disponible
 queda guardada primero como pendiente. La validación posterior se realiza en
-paquetes independientes de hasta cinco cuentas por servidor. Las URLs genéricas
-que no contienen usuario y contraseña se ignoran porque no permiten crear una
+lotes globales del tamaño elegido y siguiendo el orden de guardado. Las URLs
+genéricas que no contienen usuario y contraseña se ignoran porque no permiten crear una
 cuenta Xtream. La contraseña no se muestra en esta vista.
 
 Haz doble clic en una cuenta de la ventana de la base de datos para consultar
